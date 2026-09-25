@@ -19,12 +19,12 @@ Runs inside the nosaic builder container (qemu-system-x86_64, python3,
 sfdisk). No KVM is assumed; everything is sized for TCG.
 """
 import argparse
+import hashlib
 import http.server
 import json
 import os
 import re
 import select
-import shutil
 import socketserver
 import subprocess
 import sys
@@ -145,6 +145,20 @@ def part_bytes(disk, p):
         return f.read(p["size"] * 512)
 
 
+def sparse_copy(src, dst):
+    # VM disks are mostly holes. A plain copy writes every zero and turns a
+    # few hundred MiB of real data into the disk's full nominal size.
+    subprocess.check_call(["cp", "--sparse=always", src, dst])
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def step(msg):
     print("==> " + msg, flush=True)
 
@@ -203,7 +217,7 @@ def t_onie(a):
         ok("ONIE is running from the disk")
     finally:
         vm.stop()
-    shutil.copy(disk, os.path.join(a.out, "onie-golden.raw"))
+    sparse_copy(disk, os.path.join(a.out, "onie-golden.raw"))
     names = [p.get("name") for p in partitions(disk)]
     ok("ONIE's layout: %s" % names)
 
@@ -224,14 +238,14 @@ def fresh_disk(a, name):
     if not os.path.exists(src):
         raise Fail("no ONIE disk; run the 'onie' step first")
     dst = os.path.join(a.out, name)
-    shutil.copy(src, dst)
+    sparse_copy(src, dst)
     return dst
 
 
 # ── netboot ──────────────────────────────────────────────────────────────────
 def t_netboot(a):
     disk = fresh_disk(a, "netboot-disk.raw")
-    before = open(disk, "rb").read()
+    before = digest(disk)
     bins = [f for f in os.listdir(a.netboot) if f.endswith("-netboot.bin")]
     if not bins:
         raise Fail("no *-netboot.bin in %s" % a.netboot)
@@ -251,7 +265,7 @@ def t_netboot(a):
     finally:
         vm.stop()
         httpd.shutdown()
-    if open(disk, "rb").read() != before:
+    if digest(disk) != before:
         raise Fail("the disk changed during a netboot; nothing should have been written")
     ok("the disk is byte-for-byte unchanged")
 
@@ -361,7 +375,7 @@ def main():
     ap.add_argument("--squashfs", help="a rootfs squashfs for the A/B step")
     ap.add_argument("--iso", help="ONIE recovery ISO (kvm_x86_64, legacy BIOS)")
     ap.add_argument("--out", default="rehearsal", help="logs and disks go here")
-    ap.add_argument("--disk-gib", type=int, default=8)
+    ap.add_argument("--disk-gib", type=int, default=6)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     tests = {"ramboot": t_ramboot, "onie": t_onie, "netboot": t_netboot, "install": t_install}
