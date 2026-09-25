@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal"
 )
@@ -272,6 +273,9 @@ func TestReadModuleSelectsTheCageThenReadsItsChannel(t *testing.T) {
 	fb := newFakeBoard()
 	fb.regs[3][qsfpEEPROM][0] = 0x0d // QSFP+ identifier
 	h := open(t, fb)
+	var slept time.Duration
+	sleep = func(d time.Duration) { slept += d }
+	defer func() { sleep = time.Sleep }()
 	fb.writes = nil
 	got, err := h.ReadModuleBytes(20, 0x50, -1, 0, 1)
 	if err != nil {
@@ -284,6 +288,9 @@ func TestReadModuleSelectsTheCageThenReadsItsChannel(t *testing.T) {
 	want := []string{"ch0 0x32[0x0a]=0xf7", "ch0 0x32[0x0b]=0xff"}
 	if strings.Join(fb.writes, ",") != strings.Join(want, ",") {
 		t.Errorf("writes %v, want %v", fb.writes, want)
+	}
+	if slept < 2*time.Millisecond {
+		t.Errorf("no settle after the cage select (slept %v); Dell waits 2 ms", slept)
 	}
 	if _, err := h.ReadModuleBytes(1, 0x51, -1, 0, 1); !errors.Is(err, platformhal.ErrUnsupported) {
 		t.Errorf("0x51 on a QSFP board: %v", err)

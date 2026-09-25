@@ -2,6 +2,7 @@ package s6000
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal"
 )
@@ -20,7 +21,12 @@ const (
 	regResetHi  = 0x10
 
 	cageCount = 32
+
+	modSelSettle = 2 * time.Millisecond
 )
+
+// sleep is replaced in tests.
+var sleep = time.Sleep
 
 // setCageVector writes one 32-bit control vector across both CPLDs.
 func (h *HAL) setCageVector(lo, hi int, v uint32) error {
@@ -100,7 +106,13 @@ func (h *HAL) ReadModuleBytes(cage, addr, page, offset, n int) ([]byte, error) {
 			if err := b.WriteReg(cpld, reg, byte(mask)); err != nil {
 				return err
 			}
-			return b.WriteReg(cpld, reg+1, byte(mask>>8))
+			if err := b.WriteReg(cpld, reg+1, byte(mask>>8)); err != nil {
+				return err
+			}
+			// Dell's sfp.py waits 2 ms after a select "as per HW spec"
+			// before touching the module; so does this.
+			sleep(modSelSettle)
+			return nil
 		}},
 		step{ch, func(b bus) error {
 			if page >= 0 {

@@ -58,10 +58,16 @@ platform_hal:
     fan_floor_percent: 40
 
 # The cooling band, against the hottest of the tmp75s, the S1220's dies and
-# the DIMM. Dell's limits are 80 °C on the board sensors (sensors.conf) and
-# 85 °C critical on the CPU and DIMM; full fan well before either. Not
-# measured on a unit: the first run's `nosaic platform thermal --once` output
-# is what to tune this against.
+# the DIMM. Not measured on a unit: the first run's `nosaic platform thermal
+# --once` output is what to tune this against.
+#
+# For reference, what Dell's SONiC does (fancontrol.sh, every 5 s): the
+# AVERAGE of the three tmp75s, stepped --
+#     <=25 C  7000 rpm   26-44 C 10000   45-59 C 13000   60-79 C 16000
+#     >=80 C 19000 rpm, and a software shutdown ("Thermal Overload")
+# with 16200 rpm if any tray reads under 1000 rpm, and 15000 rpm at boot.
+# This band reads the HOTTEST sensor, CPU dies included, which run warmer than
+# the board average; hence starting it higher than Dell's steps.
 thermal:
   min_c: 45
   max_c: 70
@@ -73,7 +79,12 @@ status: planned              # planned | bringup | experimental | production
 # Only what the SONiC 202012 image states outright. The DMA reservation
 # (memmap=64M$...) is deliberately absent: it has to be read off this board's
 # own e820, and a wrong one segfaults nosd rather than failing to map.
-kernel_params: "processor.max_cstate=1 intel_idle.max_cstate=0 iomem=relaxed"
+# reboot=p: the kernel's reboot is a full cold reset through port 0xCF9 --
+# exactly what Dell's SONiC does on this board -- and the fallback if the CPLD
+# power cycle in shutdown cannot run. intel_iommu=off: off by default in this
+# kernel already, stated because the userspace BDE hands the ASIC physical
+# addresses and an IOMMU turned on later would break DMA silently.
+kernel_params: "processor.max_cstate=1 intel_idle.max_cstate=0 reboot=p intel_iommu=off iomem=relaxed"
 
 notes: >
   Dell S6000-ON: Intel Atom S1220, BCM56850 Trident2 (14e4:b850 at 01:00.0),
@@ -83,8 +94,9 @@ notes: >
   ⚠ Boots through onie-grub, not onie-sfx. ONIE shares the disk here, and
   onie-sfx would dd over it. The backend is modelled on SONiC's installer.
 
-  ⚠ Reboot must go through the system CPLD (0x31 reg 0x01 = 0xfd). That is
-  a hard power cycle, which the ASIC needs to come back correctly.
+  ⚠ Reboot must be a full reset, never a warm one: the CPLD power cycle
+  (0x31 reg 0x01 = 0xfd) as Dell's ONIE does, or a 0xCF9 cold reset as
+  Dell's SONiC does. See kernel_params and hardware.md.
 
   ⚠ The QSFP I2C "mux" is the CPLDs, not a pca954x: an active-low one-hot
   modsel written to slave 0x33 regs 0x00/0x01 (ports 0-15) and master 0x32

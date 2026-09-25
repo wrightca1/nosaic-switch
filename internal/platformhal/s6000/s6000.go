@@ -240,9 +240,11 @@ func (h *HAL) ReleaseSwitchChip(ctx context.Context) error {
 
 // PowerCycle cuts power to the whole board through the system CPLD.
 //
-// ⚠ THIS IS HOW THIS BOARD REBOOTS. Dell replaces reboot with this write in
-// both ONIE and SONiC: "triggers a hard system reboot, required by ASIC to
-// operate correctly". A plain CPU reset leaves the Trident II as it was.
+// ⚠ THIS IS HOW NOSAIC REBOOTS THIS BOARD. Dell's ONIE replaces reboot with
+// this write -- "triggers a hard system reboot, required by ASIC to operate
+// correctly". Dell's SONiC instead does a full cold reset through port 0xCF9
+// (0x0e), which is what the kernel's own reboot does here with reboot=p, and
+// is the fallback if this fails. Either way, not a warm CPU reset.
 // Nothing after this call runs; sync before calling it.
 func (h *HAL) PowerCycle() error {
 	return h.t.on(chSystem, func(b bus) error {

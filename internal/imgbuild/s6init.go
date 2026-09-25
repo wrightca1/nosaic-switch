@@ -296,10 +296,11 @@ esac
 // powerCycleReboot names the platform drivers on whose boards a reboot must
 // be a power cycle through the board's own controller.
 //
-// ⚠ ON THESE BOARDS A CPU RESET IS NOT A REBOOT. The Dell S6000-ON's Trident
-// II keeps its state across a warm reset and comes back unusable; Dell's ONIE
-// and SONiC both replace reboot with the CPLD write for that reason. The
-// kernel reboot below stays as the fallback, so a HAL that cannot reach its
+// ⚠ ON THESE BOARDS A WARM CPU RESET IS NOT A REBOOT. The Dell S6000-ON's
+// ONIE replaces reboot with the CPLD power cycle, which its comment says the
+// Trident II needs; Dell's SONiC uses a full 0xCF9 cold reset instead. The
+// kernel reboot below stays as the fallback -- the board's kernel_params set
+// reboot=p to make it that cold reset -- so a HAL that cannot reach its
 // controller still restarts the box rather than hanging it.
 var powerCycleReboot = map[string]bool{"dell-s6000": true}
 
