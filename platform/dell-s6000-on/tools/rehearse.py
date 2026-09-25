@@ -169,9 +169,13 @@ def t_ramboot(a):
         ok("the initramfs ran")
         vm.expect(r"NOSAIC-BOOT userspace reached", 900)
         ok("init reached userspace")
-        i = vm.expect([r"NOSAIC-SELFTEST OK", r"NOSAIC-SELFTEST FAIL.*"], 900)
+        # One "FAIL <reason>" line per failed check, then a bare verdict.
+        i = vm.expect([r"NOSAIC-SELFTEST OK\r?\n", r"NOSAIC-SELFTEST FAILED\r?\n"], 900)
+        text = vm.buf.decode("utf-8", "replace")
+        for line in re.findall(r"NOSAIC-SELFTEST (?:note|no data|FAIL \S)[^\r\n]*", text):
+            print("        " + line)
         if i != 0:
-            raise Fail("self-test failed\n" + vm.tail())
+            raise Fail("self-test failed")
         ok("self-test passed")
     finally:
         vm.stop()

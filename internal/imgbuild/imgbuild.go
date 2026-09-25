@@ -601,19 +601,20 @@ grep -q "^admin:" /etc/passwd && say "login account present" || { say "FAIL no a
 
 # Persistence. A count that survives a reboot is the only honest way to show
 # that the data partition is real rather than a tmpfs pretending to be one.
-if mountpoint -q /mnt/data 2>/dev/null || [ -d /mnt/data/config ]; then
+#
+# The RAM-boot case is tested FIRST. A RAM boot builds /mnt/data/config in
+# tmpfs, so the persistent branch's own test matched it and then failed on
+# secrets/ -- the RAM-boot branch, which used to come second, was unreachable, and the
+# first netboot of a new switch reported itself broken.
+if [ -f /etc/nosaic/ramboot ]; then
+    say "no data partition, as expected for a RAM boot"
+elif mountpoint -q /mnt/data 2>/dev/null || [ -d /mnt/data/config ]; then
     n=0
     [ -f /mnt/data/boot-count ] && n=$(cat /mnt/data/boot-count 2>/dev/null || echo 0)
     n=$((n + 1))
     echo "$n" > /mnt/data/boot-count 2>/dev/null && say "boot count $n" || { say "FAIL data partition is not writable"; fail=1; }
     [ -d /mnt/data/config ]  && say "config directory present"  || { say "FAIL no config directory"; fail=1; }
     [ -d /mnt/data/secrets ] && say "secrets directory present" || { say "FAIL no secrets directory"; fail=1; }
-elif [ -f /etc/nosaic/ramboot ]; then
-    # A RAM boot has no persistent storage and is not supposed to. Asserting
-    # otherwise fails an image that is behaving exactly as intended, which is
-    # how the first network boot of a new switch would have reported itself
-    # broken.
-    say "no data partition, as expected for a RAM boot"
 else
     say "FAIL no data partition mounted"; fail=1
 fi
