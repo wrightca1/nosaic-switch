@@ -28,7 +28,10 @@ const platformUsage = `usage: nosaic platform <command>
 
   status               what the board reports about itself
   mac                  the board's own base MAC, from its identity PROM
-  release-asic         take the switch chip out of reset and wait for it
+  release-asic [--boot]
+                       take the switch chip out of reset and wait for it;
+                       --boot (the boot service's form) carries on if the
+                       platform driver cannot open
   power-cycle          reboot by cutting board power, on a board that needs it
   asic                 what the switch chip says about itself (read-only)
   transceivers         which front-panel cages have modules in them
@@ -71,6 +74,20 @@ func platformCmd(args []string) error {
 
 	hal, b, err := openBoardHAL(boardID)
 	if err != nil {
+		// ⚠ AT BOOT, A PLATFORM THAT CANNOT BE REACHED MUST NOT STOP THE BOX.
+		//
+		// asic-release is a oneshot, and a oneshot that exits non-zero fails
+		// s6-rc's whole change: no getty, no network, a rescue shell. A HAL
+		// that cannot open -- a board.yml bus statement that is wrong for
+		// this unit, a missing kernel driver -- would then cost the operator
+		// every means of finding out why. So the service says so, loudly,
+		// and lets the rest of the system come up; the datapath, which needs
+		// the chip, fails visibly on its own. Typed by hand, it is an error.
+		if len(rest) > 1 && rest[0] == "release-asic" && rest[1] == "--boot" {
+			fmt.Printf("NOSAIC-PLATFORM-FAIL the platform driver could not open: %v\n", err)
+			fmt.Println("NOSAIC-PLATFORM-FAIL continuing without it; fans, sensors and optics are unmanaged")
+			return nil
+		}
 		return err
 	}
 	if c, ok := hal.(interface{ Close() error }); ok {

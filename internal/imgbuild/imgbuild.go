@@ -996,7 +996,7 @@ poweroff -f
 	if haveGoCLI && o.Board.PlatformHAL.Driver != "" && datapathInstalled(o, packages) {
 		services = append(services, svcgen.Service{
 			Name:    "asic-release",
-			Exec:    "/usr/bin/nosaic platform release-asic",
+			Exec:    "/usr/bin/nosaic platform release-asic --boot",
 			Restart: "never",
 		})
 	}
