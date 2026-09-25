@@ -298,6 +298,7 @@ func checkBootTools(res *Result, root string) {
 		"mkfs.vfat": "dosfstools",
 		"mcopy":     "mtools",
 		"mmd":       "mtools",
+		"sfdisk":    "fdisk",
 	}
 	df := filepath.Join(root, "builder", "Dockerfile.build")
 	b, err := os.ReadFile(df)

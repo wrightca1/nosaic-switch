@@ -179,7 +179,7 @@ func TestAbootWritesBootConfig(t *testing.T) {
 
 func TestBackendsRefuseIncompleteImages(t *testing.T) {
 	dir := t.TempDir()
-	for _, id := range []string{"onie-sfx", "aboot", "virt", "uboot", "uefi"} {
+	for _, id := range []string{"onie-sfx", "onie-grub", "aboot", "virt", "uboot", "uefi"} {
 		b, _ := For(id)
 		if _, err := b.Wrap(Image{Board: "b", Version: "1"}, dir, io.Discard); err == nil {
 			t.Errorf("%s accepted an image with no artifacts", id)

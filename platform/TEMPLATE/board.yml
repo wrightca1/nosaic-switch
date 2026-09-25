@@ -9,7 +9,7 @@ model: ""                    # e.g. 7050sx2-72q
 # asic selects which nosd provider this board installs.
 arch: ""                     # x86_64 | aarch64 | powerpc | armhf
 asic: ""                     # e.g. td2p, td2, tdp, helix4, prestera, virt
-boot: ""                     # virt | aboot | onie-sfx | uboot
+boot: ""                     # virt | aboot | onie-sfx | onie-grub | uboot | uefi
 
 # Only for boot: uboot. Where in RAM the kernel is loaded, which is a property
 # of the SoC -- there is no safe default, and a wrong one hangs the board with

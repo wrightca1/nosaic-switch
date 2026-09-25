@@ -147,7 +147,9 @@ func copyTree(src, dst string) error {
 }
 
 func archIDs(root string) []string { return dirNames(filepath.Join(root, "arch")) }
-func bootIDs(root string) []string { return []string{"virt", "aboot", "onie-sfx", "uboot", "uefi"} }
+func bootIDs(root string) []string {
+	return []string{"virt", "aboot", "onie-sfx", "onie-grub", "uboot", "uefi"}
+}
 
 func dirNames(dir string) []string {
 	es, err := os.ReadDir(dir)
