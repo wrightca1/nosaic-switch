@@ -36,6 +36,9 @@ local.mk
 /platform/*/config/statusleds.conf
 # The ASIC LED processor program and port map, from the vendor's .soc.
 /platform/*/config/ledproc.conf
+# The S6000's portmode.conf is generated with its port map (mkconf.sh
+# --breakout); on other boards it is shipped.
+/platform/dell-s6000-on/config/portmode.conf
 # Where each of the AS4610-54T's 48 copper PHYs answers on MDIO. Same rule:
 # read off a switch running the vendor's OS, so the numbers are the vendor's.
 /platform/*/config/phymap.conf

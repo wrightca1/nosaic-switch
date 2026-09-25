@@ -44,21 +44,49 @@
 # 0xd2b0). The check below refuses one that does not, rather than silently
 # producing a port that ignores its main and post taps.
 #
-# USAGE
-#   ./mkconf.sh <config.bcm> <output-dir>
+# 4x10G BREAKOUT: --breakout <cage,cage,...>
 #
-# then put the three files where the datapath looks: /mnt/data/config on an
+# Cages are numbered 1-32 in front-panel order (cage N is SONiC's
+# fortyGigE0/<4(N-1)>). A listed cage is given four logical port numbers
+# instead of one, the rest renumbered after it, and the datapath's portmode
+# mechanism splits it into four 10G ports at boot (portmode.conf,
+# nosaic_portmode_<base>=4x10g). The per-lane data follows Dell's own
+# breakout configs, checked against the Q24S32 SKU for the same cage:
+#
+#   lane 1 keeps the 40G port's keys unchanged -- lane maps, the 4-bit
+#     polarity masks and all four lanes' serdes values;
+#   lanes 2-4 get only polarity: bit <i> of the 40G port's mask.
+#
+# Interface names come out with the map, in portmap.conf, because the logical
+# numbers now depend on the layout: et<cage> for a 40G cage, et<cage>_1 ..
+# et<cage>_4 for a broken-out one, each on internal VLAN 1000+<logical>.
+#
+# Switching a cage between 40G and 4x10G is re-running this with a different
+# list and restarting nosd. The Trident II's limits are checked: at most 52
+# front-panel ports per pipeline (cages 1-16 and 17-32), and NOSaic's 64
+# Linux interfaces.
+#
+# USAGE
+#   ./mkconf.sh <config.bcm> <output-dir> [--breakout 29,30]
+#
+# then put the four files where the datapath looks: /mnt/data/config on an
 # installed switch, or platform/dell-s6000-on/config/ before `make image` or
 # `make netboot` (a RAM boot has no /mnt/data to keep them in). Never commit
 # them.
 set -eu
 
-if [ $# -ne 2 ]; then
-    echo "usage: $0 <config.bcm> <output-dir>" >&2
+BREAKOUT=""
+if [ $# -eq 4 ] && [ "$3" = --breakout ]; then
+    BREAKOUT=$4
+elif [ $# -ne 2 ]; then
+    echo "usage: $0 <config.bcm> <output-dir> [--breakout <cage,...>]" >&2
     exit 2
 fi
 IN=$1
 OUT=$2
+case "$BREAKOUT" in
+    *[!0-9,]*) echo "error: --breakout takes cage numbers 1-32, e.g. 29,30" >&2; exit 2 ;;
+esac
 [ -r "$IN" ] || { echo "error: cannot read $IN" >&2; exit 1; }
 mkdir -p "$OUT"
 
@@ -136,8 +164,107 @@ sort "$OUT/.serdes.raw" > "$OUT/.serdes.tmp"
 rm -f "$OUT/.serdes.raw"
 { echo "$HEADER"; cat "$OUT/.serdes.tmp"; } > "$OUT/serdes.conf"
 
-ports=$(grep -c . "$OUT/.portmap.tmp")
-pol=$(grep -c . "$OUT/.polarity.tmp" || true)
-ser=$(grep -c . "$OUT/.serdes.tmp" || true)
+# ── Layout: cage -> logical port, with room for the broken-out cages ─────────
+#
+# Up to here every key is numbered by Dell's 32x40G map, where logical port N
+# is front-panel cage N. Renumber them all for the chosen layout, and add what
+# a broken-out cage needs.
+cat "$OUT/.portmap.tmp" "$OUT/.polarity.tmp" "$OUT/.serdes.tmp" | awk -F= \
+    -v breakout="$BREAKOUT" -v hdr="$HEADER" -v out="$OUT" '
+function die(m) { print "error: " m > "/dev/stderr"; bad = 1; exit 1 }
+function hex(s,    i, c, v) {
+    s = tolower(s); sub(/^0x/, "", s); v = 0
+    for (i = 1; i <= length(s); i++) {
+        c = index("0123456789abcdef", substr(s, i, 1))
+        if (c == 0) return -1
+        v = v * 16 + c - 1
+    }
+    return v
+}
+BEGIN {
+    n = split(breakout, b, ",")
+    for (i = 1; i <= n; i++) {
+        if (b[i] == "") continue
+        c = b[i] + 0
+        if (c < 1 || c > 32) die("cage " b[i] " is not 1-32")
+        if (c in split4) die("cage " c " is listed twice")
+        split4[c] = 1
+    }
+    l = 1
+    for (c = 1; c <= 32; c++) { newlog[c] = l; l += (c in split4) ? 4 : 1 }
+}
+{
+    key = $1; val = $2
+    if (!match(key, /_[0-9]+$/)) die("unexpected key " key)
+    old = substr(key, RSTART + 1) + 0
+    if (!(old in newlog)) die(key " is not one of the 32 cages")
+    nk = substr(key, 1, RSTART) newlog[old]
+    if (key ~ /^portmap_/) { phys[old] = val + 0; pm[newlog[old]] = val; next }
+    if (key ~ /^phy_xaui_(rx|tx)_polarity_flip_/) {
+        pol[nk] = val
+        if (old in split4) {
+            m = hex(val); if (m < 0) die("bad polarity " key "=" val)
+            dir = (key ~ /_rx_/) ? "rx" : "tx"
+            for (i = 1; i < 4; i++)
+                sub4[sprintf("phy_xaui_%s_polarity_flip_%d", dir, newlog[old] + i)] = \
+                    sprintf("0x%x", int(m / 2 ^ i) % 2)
+        }
+        next
+    }
+    if (key ~ /^xgxs_/) { pol[nk] = val; next }
+    ser[nk] = val
+}
+END {
+    if (bad) exit 1
+    # The Trident II takes at most 52 front-panel ports per pipeline, and
+    # the pipelines split the physical lanes at 64.
+    for (c = 1; c <= 32; c++) {
+        w = (c in split4) ? 4 : 1
+        if (phys[c] <= 64) px += w; else py += w
+        nports += w
+    }
+    if (px > 52 || py > 52)
+        die(sprintf("%d and %d ports on the two pipelines; the Trident II takes 52 each", px, py))
+    if (nports > 64)
+        die(nports " interfaces; NOSaic builds at most 64 (NOSAIC_MAX_TAPS)")
+
+    f = out "/portmap.conf"
+    print hdr > f
+    print "# Layout: " (breakout == "" ? "32x40G" : "cages " breakout " as 4x10G") > f
+    for (c = 1; c <= 32; c++) print "portmap_" newlog[c] "=" pm[newlog[c]] > f
+    print "" > f
+    print "# Interfaces: et<cage>, or et<cage>_<lane> when broken out." > f
+    for (c = 1; c <= 32; c++) {
+        L = newlog[c]
+        if (c in split4)
+            for (i = 0; i < 4; i++)
+                printf "tap_et%d_%d=%d:%d:1500\n", c, i + 1, L + i, 1000 + L + i > f
+        else
+            printf "tap_et%d=%d:%d:1500\n", c, L, 1000 + L > f
+    }
+
+    f = out "/polarity.conf"
+    print hdr > f
+    for (k in pol) print k "=" pol[k] | "sort >> " out "/polarity.conf"
+    close("sort >> " out "/polarity.conf")
+    if (length(sub4) > 0) {
+        print "# Lanes 2-4 of broken-out cages: one bit of the cage mask each." >> f
+        for (k in sub4) print k "=" sub4[k] | "sort >> " out "/polarity.conf"
+        close("sort >> " out "/polarity.conf")
+    }
+
+    f = out "/serdes.conf"
+    print hdr > f
+    for (k in ser) print k "=" ser[k] | "sort >> " out "/serdes.conf"
+    close("sort >> " out "/serdes.conf")
+
+    f = out "/portmode.conf"
+    print hdr > f
+    for (c = 1; c <= 32; c++)
+        if (c in split4) print "nosaic_portmode_" newlog[c] "=4x10g" > f
+
+    printf "wrote %s: %d cages, %d ports (%d/%d per pipeline), %d interfaces\n", \
+        out, 32, nports, px, py, nports > "/dev/stderr"
+}' || { rm -f "$OUT"/.*.tmp "$OUT/portmap.conf" "$OUT/polarity.conf" "$OUT/serdes.conf" "$OUT/portmode.conf"
+        echo "error: refused; nothing written" >&2; exit 1; }
 rm -f "$OUT/.portmap.tmp" "$OUT/.polarity.tmp" "$OUT/.serdes.tmp"
-echo "wrote $OUT/portmap.conf ($ports ports), polarity.conf ($pol lines), serdes.conf ($ser lines)" >&2

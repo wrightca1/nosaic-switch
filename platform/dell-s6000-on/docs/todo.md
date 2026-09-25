@@ -37,7 +37,10 @@ engineering). Nothing here has run on an S6000 yet.
 - Per-cable SerDes: SONiC re-applies preemphasis for 3 m 40G DAC
   (`media_settings.json`); NOSaic uses config.bcm's defaults for everything.
 - SER / parity events: nothing registered to report them.
-- 4x10G breakout: needs a renumbered map; the SONiC image carries the data.
+- Changing breakout without a restart: SONiC does it live (dynamic port
+  breakout, SAI port remove/create); NOSaic picks the layout at boot
+  (`mkconf.sh --breakout`). The front-panel LED program's remap is Dell's
+  40G one; broken-out lanes may not each get their own LED.
 - A port whose PHY init fails is never retried.
 
 ## Done without the switch (verify on the first unit)

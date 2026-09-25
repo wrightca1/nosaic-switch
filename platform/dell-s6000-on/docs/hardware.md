@@ -67,10 +67,21 @@ preemphasis value carries the tap-force bit, and refuses rather than writing
 half a file. The data describes the board's copper, not the unit, so one run
 serves every S6000.
 
-Logical ports 1-32 are cages 0-31 in front-panel order (checked against
-SONiC's `port_config.ini`), and `config/asic.conf` names them `et1`-`et32`.
-40G only: SONiC numbers the cages consecutively, which leaves no room for the
-datapath's 4x10G breakout.
+Cages are numbered 1-32 in front-panel order (cage N is SONiC's
+`fortyGigE0/<4(N-1)>`; checked against `port_config.ini`). With no breakout,
+logical port N is cage N and the interfaces are `et1`-`et32`.
+
+**4x10G breakout.** `mkconf.sh --breakout 29,30` gives each listed cage four
+logical numbers (renumbering the cages after it), writes
+`nosaic_portmode_<base>=4x10g` to `portmode.conf`, and names the lanes
+`et29_1`-`et29_4`. The datapath's portmode then maps the four lanes as 10G
+ports at boot. Per-lane data follows Dell's own breakout configs, checked
+against the Q24S32 SKU for the same cage: lane 1 keeps the 40G port's lane
+maps, polarity masks and serdes values; lanes 2-4 get only one bit of the
+polarity mask each. Limits enforced: 52 front-panel ports per pipeline (cages
+1-16, 17-32) and NOSaic's 64 interfaces. Switching a cage between modes is
+re-running the generator and restarting `nosd`. The unit read so far runs
+cages 29 and 30 as 4x10G under SONiC (dynamic port breakout; 38 ports).
 
 ## Register and memory regions
 
