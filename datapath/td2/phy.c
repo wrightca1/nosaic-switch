@@ -497,7 +497,19 @@ static void phy_cage_tune(int unit, int port, uint16 addr);
 int nosaic_phy_cage_enable(int unit, int port)
 {
 	uint16 addr = 0, v = 0;
+	const char *drv = soc_phyctrl_drv_name(unit, port);
 
+	/*
+	 * ⚠ ONLY WHERE THE SDK BOUND A BCM84328. Everything below is that part's
+	 * vendor registers. A board whose cages are on the ASIC's own SerDes --
+	 * the Dell S6000-ON -- has no retimer, but the SDK still assigns each
+	 * port a default MDIO address, so the address test alone let this read,
+	 * and possibly write, an MDIO device that is not there on every port,
+	 * and print "this cage will not link" for cages that link fine.
+	 */
+	if (drv == NULL || strstr(drv, "84328") == NULL) {
+		return -1;
+	}
 	if (soc_phy_cfg_addr_get(unit, port, 0, &addr) < 0 || addr == 0) {
 		return -1;
 	}

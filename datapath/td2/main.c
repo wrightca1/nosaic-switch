@@ -404,6 +404,7 @@ static int attach(const char *bdf, char **confs, int nconf, int full)
 			return 1;
 		printf("the chip is initialised and running.\n\n");
 		nosaic_ledproc_start(unit);
+		nosaic_sdk_port_policy();
 		nosaic_props_report_unused();
 		nosaic_sdk_ports(unit);
 	}
@@ -546,6 +547,7 @@ static int run_daemon(const char *bdf, char **confs, int nconf)
 	 * which resets the LED processors' remap and data RAM, and before the
 	 * unused-property report, which would otherwise list every ledproc_ key. */
 	nosaic_ledproc_start(unit);
+	nosaic_sdk_port_policy();
 
 	/*
 	 * Which properties the SDK actually read, reported here and not only on

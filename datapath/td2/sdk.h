@@ -18,4 +18,9 @@ int nosaic_sdk_bcm_init(int unit);
 /* Report which ports have link. */
 int nosaic_sdk_ports(int unit);
 
+/* Read the per-board port policy (nosaic_pause, nosaic_linkscan_mode,
+ * nosaic_rx_los). Call after bcm_init and before the unused-property report;
+ * nosaic_sdk_ports() applies it. */
+void nosaic_sdk_port_policy(void);
+
 #endif

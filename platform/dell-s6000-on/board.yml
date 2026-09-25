@@ -50,6 +50,12 @@ data_mib: 1024
 # reading the system CPLD.
 platform_hal:
   driver: dell-s6000
+  # The BCM56850, read off a running unit (lspci: 01:00.0 [14e4:b850] rev 03).
+  # On PCIe from power-on here -- there is no release to wait for -- and
+  # stated so the interrupt binding (asic-irq) and `nosaic platform schan`
+  # can find it. Interrupts themselves stay polled for the first run
+  # (asic.conf); see docs/todo.md.
+  asic_pci: "0000:01:00.0"
   dell_s6000:
     mux_parent: "0000:00:1f.0"
     psu_bus: "0000:00:13.1"

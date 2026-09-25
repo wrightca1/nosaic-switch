@@ -966,6 +966,28 @@ static void report_phy(int unit, int port, const char *what)
 	       (name != NULL && *name != '\0') ? name : "NONE -- no external PHY bound");
 }
 
+/* Per-board port policy, from nosaic_* properties. Read by
+ * nosaic_sdk_port_policy() after bcm_init, so the properties are marked used
+ * before the unused-property report -- which would otherwise tell the
+ * operator they have no effect -- and applied by nosaic_sdk_ports(). */
+static struct {
+	int pause_off;      /* nosaic_pause=off */
+	int linkscan_sw;    /* nosaic_linkscan_mode=sw */
+	int rx_los;         /* nosaic_rx_los=1 */
+} port_policy;
+
+void nosaic_sdk_port_policy(void)
+{
+	const char *v;
+
+	port_policy.pause_off = (v = nosaic_props_get("nosaic_pause")) != NULL &&
+				strcmp(v, "off") == 0;
+	port_policy.linkscan_sw = (v = nosaic_props_get("nosaic_linkscan_mode")) != NULL &&
+				  strcmp(v, "sw") == 0;
+	port_policy.rx_los = (v = nosaic_props_get("nosaic_rx_los")) != NULL &&
+			     strcmp(v, "1") == 0;
+}
+
 int nosaic_sdk_ports(int unit)
 {
 	bcm_port_config_t cfg;
@@ -1041,6 +1063,18 @@ int nosaic_sdk_ports(int unit)
 		 * and not the board. */
 		report_phy(unit, port, port_is_40g(unit, port) ? "cage" : "copper");
 
+		/* Pause off, as SAI does on every port. The SDK's XLMAC init turns
+		 * TX and RX pause ON (xlmac.c: md_pause_set(TRUE, TRUE)), so a port
+		 * honours a neighbour's PAUSE and can stall. Opt-in per board --
+		 * nosaic_pause=off -- because the siblings ran with it on. */
+		if (port_policy.pause_off) {
+			int prv = bcm_port_pause_set(unit, port, 0, 0);
+
+			if (prv < 0)
+				fprintf(stderr, "nosd-td2: port %d: pause off returned %d (%s)\n",
+					port, prv, bcm_errmsg(prv));
+		}
+
 		erv = bcm_port_enable_set(unit, port, 1);
 
 		if (erv < 0 && enable_failures++ == 0)
@@ -1074,14 +1108,49 @@ int nosaic_sdk_ports(int unit)
 	 * that is what the predecessor does on this exact board, and its copper
 	 * ports carried traffic.
 	 */
+	/*
+	 * SW instead, per board, with nosaic_linkscan_mode=sw: what SAI runs on
+	 * a Trident II, and what the S6000 declares. Software linkscan polls each
+	 * port's PHY link_get, and on the TD2's Warpcore that is where the
+	 * SOFTWARE_RX_LOS machine below lives -- in HW mode it runs only on a
+	 * change the hardware already saw. HW stays the default: the siblings
+	 * were proven on it.
+	 */
 	{
-		int lrv = bcm_linkscan_mode_set_pbm(unit, cfg.port,
-						    BCM_LINKSCAN_MODE_HW);
+		int mode = BCM_LINKSCAN_MODE_HW;
+		int lrv;
 
+		if (port_policy.linkscan_sw)
+			mode = BCM_LINKSCAN_MODE_SW;
+		lrv = bcm_linkscan_mode_set_pbm(unit, cfg.port, mode);
 		if (lrv < 0)
 			fprintf(stderr, "nosd-td2: bcm_linkscan_mode_set_pbm returned "
 				"%d (%s); ports without a mode transmit nothing and "
 				"report success doing it\n", lrv, bcm_errmsg(lrv));
+		printf("linkscan: %s mode on every port\n",
+		       mode == BCM_LINKSCAN_MODE_SW ? "software" : "hardware");
+	}
+
+	/*
+	 * The one Trident II PHY workaround SAI applies itself: software RX loss
+	 * of signal on every port (bcm_port_phy_control_set SOFTWARE_RX_LOS=1).
+	 * With it the Warpcore's link_get runs a reset / RX-restart state machine
+	 * when signal comes and goes; without it, a reseated cable or optic can
+	 * leave a link that is up and passes nothing. Needs software linkscan to
+	 * be polled. Opt-in per board: nosaic_rx_los=1.
+	 */
+	if (port_policy.rx_los) {
+		int n = 0, bad = 0;
+
+		BCM_PBMP_ITER(cfg.port, port) {
+			if (bcm_port_phy_control_set(unit, port,
+					BCM_PORT_PHY_CONTROL_SOFTWARE_RX_LOS, 1) < 0)
+				bad++;
+			else
+				n++;
+		}
+		printf("rx-los: software RX LOS on %d port(s)%s\n", n,
+		       bad ? " (some refused)" : "");
 	}
 
 	/*
