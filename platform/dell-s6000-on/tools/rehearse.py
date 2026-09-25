@@ -62,14 +62,18 @@ class VM:
         self.log.flush()
         return True
 
-    def expect(self, patterns, timeout, fail=(r"Kernel panic",)):
+    # A rescue shell is a failed boot, whatever else prints: it was missed
+    # once, because a login prompt or a self-test result still appeared.
+    ALWAYS_FAIL = (r"Kernel panic", r"NOSAIC-RESCUE")
+
+    def expect(self, patterns, timeout, fail=()):
         """Wait for any of patterns after the last match; return its index."""
         if isinstance(patterns, str):
             patterns = [patterns]
         deadline = time.time() + timeout
         while True:
             text = self.buf[self.pos:].decode("utf-8", "replace")
-            for f in fail:
+            for f in self.ALWAYS_FAIL + tuple(fail):
                 if re.search(f, text):
                     raise Fail("saw %r\n%s" % (f, self.tail()))
             for i, pat in enumerate(patterns):
@@ -131,6 +135,9 @@ def serve(directory):
     return httpd
 
 
+DISK_BUS = "virtio"
+
+
 def qemu(disk=None, cdrom=None, mem=2048, extra=()):
     a = ["qemu-system-x86_64", "-nographic", "-m", str(mem), "-smp", "2",
          "-netdev", "user,id=n0", "-device", "e1000,netdev=n0"]
@@ -138,7 +145,13 @@ def qemu(disk=None, cdrom=None, mem=2048, extra=()):
         a += ["-cdrom", cdrom, "-boot", "order=cd,once=d"]
     else:
         a += ["-boot", "c"]
-    if disk:
+    if disk and DISK_BUS == "sata":
+        # The S6000's CFast card sits behind a Marvell 88SE9170, an AHCI
+        # controller: the switch sees /dev/sda, not /dev/vda.
+        a += ["-device", "ahci,id=ahci",
+              "-drive", "file=%s,format=raw,if=none,id=d0" % disk,
+              "-device", "ide-hd,drive=d0,bus=ahci.0"]
+    elif disk:
         a += ["-drive", "file=%s,format=raw,if=virtio" % disk]
     return a + list(extra)
 
@@ -452,7 +465,11 @@ def main():
     ap.add_argument("--iso", help="ONIE recovery ISO (kvm_x86_64, legacy BIOS)")
     ap.add_argument("--out", default="rehearsal", help="logs and disks go here")
     ap.add_argument("--disk-gib", type=int, default=6)
+    ap.add_argument("--disk-bus", choices=["virtio", "sata"], default="virtio",
+                    help="sata puts the disk behind AHCI, as on the S6000")
     a = ap.parse_args()
+    global DISK_BUS
+    DISK_BUS = a.disk_bus
     os.makedirs(a.out, exist_ok=True)
     tests = {"ramboot": t_ramboot, "onie": t_onie, "netboot": t_netboot, "install": t_install}
     failed = []

@@ -9,9 +9,21 @@ page covers only what differs here.
 make toolchain ARCH=x86_64
 make packages ARCH=x86_64 PROFILE=minimal
 make pkg PKG=linux ARCH=x86_64
-make image   BOARD=dell-s6000-on      # the installer
+make pkg PKG=openbcm ARCH=x86_64      # 25+ GB of build tree; see below
+make pkg PKG=nosd-td2 ARCH=x86_64
+
+# the per-port tables, into the image (never committed)
+platform/dell-s6000-on/tools/mkconf.sh <td2-s6000-32x40G.config.bcm> platform/dell-s6000-on/config
+
 make netboot BOARD=dell-s6000-on      # the RAM-only kexec bundle
+make image   BOARD=dell-s6000-on      # the installer -- build it last
 ```
+
+`make netboot` and `make image` share `out/images/dell-s6000-on/`; build the
+installer last so the files beside it are the installer's.
+
+OpenBCM's build tree passes 25 GB. A package already built from the same
+`recipes/openbcm` for x86_64 can be dropped into `out/packages/` instead.
 
 These produce:
 
@@ -25,17 +37,18 @@ These produce:
 
 - **The `onie-grub` backend.** It is x86 ONIE, not the U-Boot-shaped
   `onie-sfx`, and it installs beside ONIE the way SONiC does.
-- **Kernel drivers** for the platform, which are not all in the x86_64
-  fragment yet: `i2c-ismt`, `lpc_sch`, `gpio-sch`, `i2c-mux-gpio`, `nvram`,
-  `at24`, `jc42`, `emc1403`, `lm75`, `max6620`, `ltc4215`, and `pmbus` for the
-  DPS-460 supplies. None are needed to boot, only for the platform HAL.
+- **Kernel drivers**, now in `recipes/linux/config/x86_64.fragment`:
+  `i2c-ismt` (the board's only SMBus -- without it the HAL has no bus at all),
+  `lpc_sch` and `gpio-sch` (the mux lines). The HAL reads every sensor itself;
+  the hwmon modules for them are built but must not be loaded.
 - **No firmware blobs.** The ASIC is driven by `nosd-td2` over OpenBCM, and
   there are no external PHYs or retimers to load firmware into.
 
 ## Profile
 
-`minimal` (s6), like every board that boots NOSaic today. The disk is a 16 GB
-SSD, so the layout (64 MiB boot, 2 × 1 GiB slots, 1 GiB data) is not tight.
+`minimal` (s6), like every board that boots NOSaic today. The layout (64 MiB
+boot, 2 × 1 GiB slots, 1 GiB data) needs about 3.1 GiB beside ONIE on the
+internal CFast card, whose size is not recorded yet.
 
 ## Verifying before you install
 

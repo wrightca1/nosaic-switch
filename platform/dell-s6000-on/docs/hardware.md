@@ -14,6 +14,8 @@ image for this board. **None of it has been observed under NOSaic yet.**
 | Front panel | 32 × QSFP+ 40G, each breakable to 4 × 10G |
 | PHYs / retimers | **none**: every cage is on the ASIC's own SerDes |
 | Loader | ONIE on x86 GRUB, on the same disk as the NOS |
+| Disk | CFast card behind a Marvell 88SE9170 (AHCI) at `02:00.0`, so `/dev/sda`; ONIE finds it by that PCI path |
+| Management NIC | Intel 82574L (`e1000e`) |
 | SMBus | 2 × Intel iSMT (`8086:0c59`, `8086:0c5a`), driver `i2c-ismt` |
 | GPIO | S1200 PCU GPIO through `lpc_sch` / `gpio-sch` |
 | Management | three CPLDs on i2c: system `0x31`, master `0x32`, slave `0x33` |
@@ -41,10 +43,18 @@ ONIE's entries are appended from ONIE's own `50_onie_grub`. SONiC boots with
 
 ## Port map
 
-Not shipped, per CONTRIBUTING: the port map, lane maps, polarity and SerDes
-preemphasis/driver-current are vendor-derived per-port data. Generate them
-from the switch's own SONiC `td2-s6000-32x40G.config.bcm` with the board
-tools, the way the other td2 boards do.
+Not shipped, per NOSaic's rule on vendor-derived per-port data. `tools/mkconf.sh`
+turns any S6000 `td2-s6000-32x40G.config.bcm` -- from a unit running SONiC or
+from sonic-buildimage -- into `portmap.conf`, `polarity.conf` and `serdes.conf`.
+It rewrites SONiC's `_xeK` SerDes keys to logical port numbers, checks every
+preemphasis value carries the tap-force bit, and refuses rather than writing
+half a file. The data describes the board's copper, not the unit, so one run
+serves every S6000.
+
+Logical ports 1-32 are cages 0-31 in front-panel order (checked against
+SONiC's `port_config.ini`), and `config/asic.conf` names them `et1`-`et32`.
+40G only: SONiC numbers the cages consecutively, which leaves no room for the
+datapath's 4x10G breakout.
 
 ## Register and memory regions
 
@@ -83,15 +93,35 @@ PHY/MDIO bring-up those boards need does not apply. The DMA reservation
 
 ## Platform HAL
 
-Not written. The generic `I2CMap` does not fit as-is: the QSFP mux is the
-CPLDs rather than a pca954x, and the whole tree sits behind a GPIO mux. The
-closest existing driver is `n3172tq`.
+`internal/platformhal/s6000`, driver `dell-s6000`, all in userspace:
+
+- the GPIO mux through the gpio character device (lines requested and
+  released per transaction, so the thermal service and the CLI can share it),
+  under a lock file, with Dell's reset-and-retry on a failed transfer;
+- the CPLDs, sensors, fan controllers and QSFP EEPROMs through `/dev/i2c-N`,
+  each decoded as its Linux driver decodes it (lm75, emc1403, jc42, max6620);
+- the two iSMT functions found by PCI function, stated in `board.yml`, and
+  checked at open by reading the system CPLD.
+
+It implements `HAL`, `Cooling` (max6620 RPM mode, 19000 RPM = 100 %),
+`Optics` (the CPLD cage select, then the cage's channel, under one lock),
+`thermal.Lamps` (system, tray and front fan LEDs), `PowerCycle`, and
+`ReleaseSwitchChip` as Dell's cage init: low power off, one-second reset.
+
+⚠ No kernel hwmon driver may be bound behind the mux: it would read whatever
+channel this driver left selected.
+
+⚠ The fan-to-tray pairing is not settled: Dell's fancontrol.sh, fan.py and
+set-fan-speed disagree. The driver follows fancontrol.sh.
 
 ## Quirks
 
-- **Reboot through the CPLD.** SONiC and Dell's ONIE both replace `reboot`
-  with `i2cset -y 0 0x31 1 0xfd`. The ASIC needs a hard power cycle to come
-  back correctly.
+- **Reboot is a full reset, never a warm one.** Dell's ONIE replaces
+  `reboot` with `i2cset -y 0 0x31 1 0xfd`, a CPLD power cycle its comment says
+  the ASIC needs. Dell's SONiC writes the reboot reason (0x0e) to CMOS byte
+  0x49 and then does a full cold reset through port 0xCF9 (0x0e). NOSaic's
+  shutdown runs `nosaic platform power-cycle`, and falls back to the kernel's
+  reboot, which `reboot=p` makes the same 0xCF9 cold reset SONiC uses.
 - **The i2c mux wedges.** Dell's driver pulses GPIO 10 and retries once
   whenever an SMBus transfer fails.
 - **QSFP reset at init.** SONiC takes all cages out of low power and pulses
