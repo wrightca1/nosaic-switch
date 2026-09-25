@@ -1,0 +1,62 @@
+# NOSaic board port. Copy this directory to platform/<id>/ and fill it in.
+# The directory name must match `id`.
+
+id: dell-s6000-on  # unique, matches the directory name
+vendor: dell  # e.g. arista, accton, juniper
+model: s6000-on  # e.g. 7050sx2-72q
+
+# The orthogonal axes. arch and boot name directories (arch/<arch>, boot/<boot>);
+# asic selects which nosd provider this board installs.
+arch: x86_64  # x86_64 | aarch64 | powerpc | armhf
+asic: td2  # e.g. td2p, td2, tdp, helix4, prestera, virt
+# x86 ONIE with legacy BIOS GRUB. NOSaic's partitions go beside ONIE's on
+# the same disk, found by GPT name, exactly as SONiC installs.
+boot: onie-grub
+
+# Only for boot: uboot. Where in RAM the kernel is loaded, which is a property
+# of the SoC -- there is no safe default, and a wrong one hangs the board with
+# nothing on the console.
+# u_boot_arch: ppc
+# u_boot_load: "0x01000000"
+# u_boot_entry: "0x01000000"
+
+# Only for boot: aboot. The newest Arista hardware epoch this image claims to
+# support; Aboot refuses a board whose epoch is higher. Read it off the switch
+# with prefdl. Defaults to 1.
+# aboot_max_hwepoch: "1"
+
+profile: minimal  # full | slim | minimal
+kernel: ""                   # empty means the fleet default
+
+# The boot partition holds the kernel, initramfs and GRUB here, not only
+# the slot pointer. The disk is 16 GB, so nothing needs squeezing.
+boot_mib: 64
+slot_mib: 1024
+data_mib: 1024
+
+status: planned              # planned | bringup | experimental | production
+
+# Only what the SONiC 202012 image states outright. The DMA reservation
+# (memmap=64M$...) is deliberately absent: it has to be read off this board's
+# own e820, and a wrong one segfaults nosd rather than failing to map.
+kernel_params: "processor.max_cstate=1 intel_idle.max_cstate=0 iomem=relaxed"
+
+notes: >
+  Dell S6000-ON: Intel Atom S1220, BCM56850 Trident2 (14e4:b850 at 01:00.0),
+  32x QSFP+ on direct SerDes. No retimers, gearboxes or external PHYs, so
+  SerDes tuning is preemphasis and driver current only.
+
+  ⚠ Boots through onie-grub, not onie-sfx. ONIE shares the disk here, and
+  onie-sfx would dd over it. The backend is modelled on SONiC's installer.
+
+  ⚠ Reboot must go through the system CPLD (0x31 reg 0x01 = 0xfd). That is
+  a hard power cycle, which the ASIC needs to come back correctly.
+
+  ⚠ The QSFP I2C "mux" is the CPLDs, not a pca954x: an active-low one-hot
+  modsel written to slave 0x33 regs 0x00/0x01 (ports 0-15) and master 0x32
+  regs 0x0a/0x0b (ports 16-31). All of it sits behind a 74CBTLV3253 GPIO mux
+  (GPIO 1, 2) on the S1200's iSMT SMBus. GPIO 10 resets it after a failed
+  transfer.
+
+  Source: sonic-buildimage 202012, platform/broadcom/sonic-platform-modules-dell/s6000.
+  None of this has been observed under NOSaic yet.
