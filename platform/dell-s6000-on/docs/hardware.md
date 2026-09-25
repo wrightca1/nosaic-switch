@@ -16,7 +16,7 @@ image for this board. **None of it has been observed under NOSaic yet.**
 | Loader | ONIE on x86 GRUB, on the same disk as the NOS |
 | Disk | CFast card behind a Marvell 88SE9170 (AHCI) at `02:00.0`, so `/dev/sda`; ONIE finds it by that PCI path |
 | Management NIC | Intel 82574L (`e1000e`) |
-| SMBus | 2 × Intel iSMT (`8086:0c59`, `8086:0c5a`), driver `i2c-ismt` |
+| SMBus | SCH legacy SMBus on the LPC bridge `00:1f.0` (`i2c-isch`, via `lpc_sch`): the mux tree. iSMT `00:13.1` (`i2c-ismt`): the PSUs. iSMT `00:13.0`: unused |
 | GPIO | S1200 PCU GPIO through `lpc_sch` / `gpio-sch` |
 | Management | three CPLDs on i2c: system `0x31`, master `0x32`, slave `0x33` |
 
@@ -25,8 +25,8 @@ image for this board. **None of it has been observed under NOSaic yet.**
 ```
  S1220 ─ PCIe ─ BCM56850 ─ SerDes ─ 32 × QSFP+
    │
-   ├─ iSMT ─ i2c (SONiC's i2c-1): PSU FRUs 0x50/0x51, DPS-460 PMBus 0x58/0x59
-   └─ iSMT ─ i2c (SONiC's i2c-2) ─ 74CBTLV3253 1:4 mux (GPIO 1,2; reset GPIO 10)
+   ├─ iSMT 00:13.1 (SONiC's i2c-1): PSU FRUs 0x50/0x51, DPS-460 PMBus 0x58/0x59
+   └─ SCH SMBus 00:1f.0 (SONiC's i2c-2) ─ 74CBTLV3253 1:4 mux (GPIO 1,2; reset GPIO 10)
         ch0: CPLDs 0x31-0x33, jc42 0x18, emc1403 0x4d, SPD 0x50, sys EEPROM 0x53
         ch1: max6620 0x29/0x2a, ltc4215 0x40/0x42, tmp75 0x4c/0x4d/0x4e,
              fan-tray EEPROMs 0x51-0x53
@@ -100,8 +100,8 @@ PHY/MDIO bring-up those boards need does not apply. The DMA reservation
   under a lock file, with Dell's reset-and-retry on a failed transfer;
 - the CPLDs, sensors, fan controllers and QSFP EEPROMs through `/dev/i2c-N`,
   each decoded as its Linux driver decodes it (lm75, emc1403, jc42, max6620);
-- the two iSMT functions found by PCI function, stated in `board.yml`, and
-  checked at open by reading the system CPLD.
+- the two buses found by PCI function, stated in `board.yml` from a running
+  unit's sysfs, and checked at open by reading the system CPLD.
 
 It implements `HAL`, `Cooling` (max6620 RPM mode, 19000 RPM = 100 %),
 `Optics` (the CPLD cage select, then the cage's channel, under one lock),

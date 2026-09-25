@@ -217,11 +217,17 @@ CONFIG_GPIO_PCA953X=m
 
 # ── Dell S6000-ON: Atom S1220 (Centerton) platform ──────────────────────────
 #
-# ⚠ WITHOUT I2C_ISMT THE S6000 HAS NO SMBUS AT ALL. Its only SMBus
-# controllers are the S1200's two iSMT functions (8086:0c59, 8086:0c5a), not
-# an i801; everything auxiliary -- CPLDs, sensors, fans, PSUs, every QSFP
-# EEPROM -- is behind them. Built in, like I2C_I801, so the buses exist
-# before anything asks for them.
+# ⚠ THE S6000 HAS THREE SMBUS CONTROLLERS, AND THE ONE THAT MATTERS IS NOT
+# AN iSMT. Read off a running unit (SONiC, /sys/bus/i2c/devices):
+#
+#   i2c-0  iSMT 00:13.0           unused
+#   i2c-1  iSMT 00:13.1           the power supplies
+#   i2c-2  SCH SMBus, 00:1f.0     the GPIO mux: CPLDs, sensors, fans, and
+#          (lpc_sch's isch_smbus) every QSFP EEPROM
+#
+# The SCH one is i2c-isch on a platform device lpc_sch creates, so it needs
+# both. Built in, like I2C_I801, so the buses exist before anything asks.
+CONFIG_I2C_ISCH=y
 CONFIG_I2C_ISMT=y
 #
 # The board's first I2C mux (a 74CBTLV3253) is selected by GPIO 1 and 2 and

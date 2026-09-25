@@ -37,7 +37,10 @@ var openBus = openPCIBus
 // sysfs is where adapters are found. Replaced in tests.
 var sysfs = "/sys"
 
-// adapterFor finds the i2c-N a PCI function provides.
+// adapterFor finds the i2c-N a PCI function provides, directly or through
+// one child device: an iSMT puts its adapter at <pci>/i2c-N, while the LPC
+// bridge's SCH SMBus is a platform device lpc_sch creates beneath it, so its
+// adapter is <pci>/isch_smbus.<n>/i2c-N.
 //
 // By PCI function rather than by number, because the number is probe order:
 // ONIE reaches the system CPLD on i2c-0 and SONiC on i2c-10, on the same box.
@@ -45,18 +48,32 @@ var sysfs = "/sys"
 // adapter at <address>", which differs only in an I/O address nobody states.
 func adapterFor(pci string) (int, error) {
 	dir := filepath.Join(sysfs, "bus", "pci", "devices", pci)
-	ents, err := os.ReadDir(dir)
-	if err != nil {
+	find := func(d string) (int, bool) {
+		ents, _ := os.ReadDir(d)
+		for _, e := range ents {
+			if n, ok := strings.CutPrefix(e.Name(), "i2c-"); ok {
+				if v, err := strconv.Atoi(n); err == nil {
+					return v, true
+				}
+			}
+		}
+		return 0, false
+	}
+	if _, err := os.Stat(dir); err != nil {
 		return 0, fmt.Errorf("PCI function %s: %w", pci, err)
 	}
-	for _, e := range ents {
-		if n, ok := strings.CutPrefix(e.Name(), "i2c-"); ok {
-			if v, err := strconv.Atoi(n); err == nil {
-				return v, nil
+	if n, ok := find(dir); ok {
+		return n, nil
+	}
+	children, _ := os.ReadDir(dir)
+	for _, c := range children {
+		if strings.HasPrefix(c.Name(), "isch_smbus") {
+			if n, ok := find(filepath.Join(dir, c.Name())); ok {
+				return n, nil
 			}
 		}
 	}
-	return 0, fmt.Errorf("PCI function %s has no i2c adapter; is CONFIG_I2C_ISMT built in?", pci)
+	return 0, fmt.Errorf("PCI function %s has no i2c adapter; are CONFIG_I2C_ISMT and CONFIG_I2C_ISCH built in?", pci)
 }
 
 func openPCIBus(pci string) (bus, error) {

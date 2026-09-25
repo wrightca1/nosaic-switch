@@ -3,11 +3,13 @@
 //
 // # Everything is behind a mux the kernel does not own
 //
-// The S1220's two iSMT SMBus controllers are the board's only buses. One
-// carries the power supplies directly. The other reaches everything else
-// through a 74CBTLV3253 -- a dual 1:4 analog switch whose channel is chosen by
-// two SoC GPIO lines -- and two of that switch's four channels fan out again,
-// sixteen QSFP cages each, through a select register in a CPLD.
+// The S1220 has three SMBus controllers. One iSMT function carries the power
+// supplies directly; the other is unused. The legacy SCH SMBus on the LPC
+// bridge reaches everything else through a 74CBTLV3253 -- a dual 1:4 analog
+// switch whose channel is chosen by two SoC GPIO lines -- and two of that
+// switch's four channels fan out again, sixteen QSFP cages each, through a
+// select register in a CPLD. (Read off a running unit: SONiC's i2c-2 is
+// 00:1f.0/isch_smbus.N/i2c-2, i2c-1 is 00:13.1.)
 //
 // Dell's SONiC driver builds all of that in the kernel: an i2c-mux-gpio
 // platform device, two register-driven mux adapters, and kernel hwmon drivers
@@ -35,13 +37,14 @@ import (
 
 // Data is this board's platform_hal.dell_s6000 block in board.yml.
 type Data struct {
-	// MuxParent is the PCI function of the iSMT controller the
-	// 74CBTLV3253 hangs off, e.g. "0000:00:13.0". The CPLDs, sensors,
-	// fans and cages are all behind it.
+	// MuxParent is the PCI function whose SMBus the 74CBTLV3253 hangs
+	// off: "0000:00:1f.0", the LPC bridge, whose SCH SMBus lpc_sch exposes
+	// as a child platform device. The CPLDs, sensors, fans and cages are
+	// all behind it.
 	MuxParent string `yaml:"mux_parent"`
 
-	// PSUBus is the PCI function of the other iSMT controller, which
-	// carries the power supplies' EEPROMs and PMBus directly.
+	// PSUBus is the PCI function of the iSMT controller carrying the power
+	// supplies' EEPROMs and PMBus directly: "0000:00:13.1".
 	PSUBus string `yaml:"psu_bus"`
 
 	// GPIOChip is the label prefix of the gpiochip carrying the mux lines:
@@ -61,13 +64,13 @@ func (d *Data) Validate() error {
 		return nil
 	}
 	if !pciFunction.MatchString(d.MuxParent) {
-		return fmt.Errorf("mux_parent %q is not a PCI function (0000:00:13.0)", d.MuxParent)
+		return fmt.Errorf("mux_parent %q is not a PCI function (0000:00:1f.0)", d.MuxParent)
 	}
 	if !pciFunction.MatchString(d.PSUBus) {
 		return fmt.Errorf("psu_bus %q is not a PCI function (0000:00:13.1)", d.PSUBus)
 	}
 	if d.MuxParent == d.PSUBus {
-		return fmt.Errorf("mux_parent and psu_bus are both %s; they are the two different iSMT functions", d.MuxParent)
+		return fmt.Errorf("mux_parent and psu_bus are both %s; they are different controllers", d.MuxParent)
 	}
 	if d.GPIOChip == "" {
 		return fmt.Errorf("gpio_chip is required (sch_gpio on the S1220)")

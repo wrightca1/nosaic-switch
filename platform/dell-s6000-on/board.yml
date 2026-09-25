@@ -42,16 +42,16 @@ data_mib: 1024
 # i2c mux and the CPLDs itself and reads every sensor directly, so NO kernel
 # hwmon driver may be bound behind the mux. See that package's doc.
 #
-# ⚠ WHICH iSMT FUNCTION IS WHICH IS NOT MEASURED YET. ONIE reaches the system
-# CPLD on its first adapter after setting the mux GPIOs, which suggests the
-# first function, 00:13.0, is the mux parent; nothing more direct is known.
-# The driver checks by reading the system CPLD at open and, if it is not
-# there, says to swap these two. The first unit's `ls -l
-# /sys/bus/i2c/devices` settles it.
+# The buses, read off a running unit (gmrproxsw02, SONiC 202012,
+# /sys/bus/i2c/devices): the mux parent is NOT an iSMT. SONiC's i2c-2 is the
+# LPC bridge's legacy SCH SMBus, 00:1f.0/isch_smbus.N/i2c-2, and the CPLDs,
+# sensors, fans and all 32 QSFPs are behind it; i2c-1 is iSMT 00:13.1 with
+# the PSUs; iSMT 00:13.0 carries nothing. The driver still checks at open by
+# reading the system CPLD.
 platform_hal:
   driver: dell-s6000
   dell_s6000:
-    mux_parent: "0000:00:13.0"
+    mux_parent: "0000:00:1f.0"
     psu_bus: "0000:00:13.1"
     gpio_chip: sch_gpio
     # Dell's fancontrol.sh idles at 7000 of 19000 RPM (37%).

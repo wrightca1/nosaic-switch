@@ -38,8 +38,9 @@ These produce:
 - **The `onie-grub` backend.** It is x86 ONIE, not the U-Boot-shaped
   `onie-sfx`, and it installs beside ONIE the way SONiC does.
 - **Kernel drivers**, now in `recipes/linux/config/x86_64.fragment`:
-  `i2c-ismt` (the board's only SMBus -- without it the HAL has no bus at all),
-  `lpc_sch` and `gpio-sch` (the mux lines). The HAL reads every sensor itself;
+  `i2c-isch` with `lpc_sch` (the SCH SMBus the whole mux tree hangs off --
+  without it the HAL has no CPLD, sensor, fan or QSFP), `i2c-ismt` (the
+  PSUs), and `gpio-sch` (the mux lines). The HAL reads every sensor itself;
   the hwmon modules for them are built but must not be loaded.
 - **No firmware blobs.** The ASIC is driven by `nosd-td2` over OpenBCM, and
   there are no external PHYs or retimers to load firmware into.

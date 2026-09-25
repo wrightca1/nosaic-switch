@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,7 +127,7 @@ func open(t *testing.T, fb *fakeBoard) *HAL {
 	}
 	openGPIO = func(string) (gpio, error) { return fb, nil }
 	h, err := Open(platformhal.Config{BoardData: &Data{
-		MuxParent: "0000:00:13.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio"}})
+		MuxParent: "0000:00:1f.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio"}})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -227,9 +228,9 @@ func TestOpenRefusesAMissingCPLD(t *testing.T) {
 	openBus = func(string) (bus, error) { return fb, nil }
 	openGPIO = func(string) (gpio, error) { return fb, nil }
 	_, err := Open(platformhal.Config{BoardData: &Data{
-		MuxParent: "0000:00:13.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio"}})
-	if err == nil || !strings.Contains(err.Error(), "the other way round") {
-		t.Fatalf("want a refusal suggesting the buses are swapped, got %v", err)
+		MuxParent: "0000:00:1f.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio"}})
+	if err == nil || !strings.Contains(err.Error(), "mux_parent") {
+		t.Fatalf("want a refusal naming mux_parent, got %v", err)
 	}
 }
 
@@ -381,12 +382,35 @@ func TestReleaseSwitchChipPulsesCageReset(t *testing.T) {
 func TestDataValidate(t *testing.T) {
 	for _, d := range []Data{
 		{MuxParent: "00:13.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio"},
-		{MuxParent: "0000:00:13.0", PSUBus: "0000:00:13.0", GPIOChip: "sch_gpio"},
+		{MuxParent: "0000:00:13.1", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio"},
 		{MuxParent: "0000:00:13.0", PSUBus: "0000:00:13.1"},
-		{MuxParent: "0000:00:13.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio", FanFloorPercent: 5},
+		{MuxParent: "0000:00:1f.0", PSUBus: "0000:00:13.1", GPIOChip: "sch_gpio", FanFloorPercent: 5},
 	} {
 		if err := d.Validate(); err == nil {
 			t.Errorf("%+v was accepted", d)
 		}
+	}
+}
+
+// The adapter layout read off a running S6000: the iSMT's adapter directly
+// under its PCI function, the SCH SMBus's one level down under lpc_sch's
+// isch_smbus platform device.
+func TestAdapterForFindsBothLayouts(t *testing.T) {
+	sysfs = t.TempDir()
+	defer func() { sysfs = "/sys" }()
+	pci := filepath.Join(sysfs, "bus", "pci", "devices")
+	for _, d := range []string{"0000:00:13.1/i2c-1", "0000:00:1f.0/isch_smbus.3168/i2c-2", "0000:00:1f.0/driver"} {
+		if err := os.MkdirAll(filepath.Join(pci, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for pciFn, want := range map[string]int{"0000:00:13.1": 1, "0000:00:1f.0": 2} {
+		n, err := adapterFor(pciFn)
+		if err != nil || n != want {
+			t.Errorf("%s: i2c-%d, %v; want i2c-%d", pciFn, n, err, want)
+		}
+	}
+	if _, err := adapterFor("0000:00:13.0"); err == nil {
+		t.Error("a PCI function that does not exist was accepted")
 	}
 }

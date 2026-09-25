@@ -60,14 +60,13 @@ func Open(cfg platformhal.Config) (*HAL, error) {
 	}
 	h := &HAL{d: d, t: &tree{b: parent, gpio: g}}
 
-	// ⚠ WHICH iSMT IS WHICH IS A STATEMENT IN board.yml, AND THIS IS WHERE
-	// IT IS CHECKED. The two functions are indistinguishable by name. A
-	// swapped pair would otherwise drive the GPIO mux over the PSU bus and
-	// read whatever answers there as a CPLD.
+	// ⚠ WHICH CONTROLLER IS WHICH IS A STATEMENT IN board.yml, AND THIS IS
+	// WHERE IT IS CHECKED. A wrong mux_parent would drive the GPIO mux over a
+	// bus with no mux behind it and read whatever answers as a CPLD.
 	if _, err := h.cpldVersions(); err != nil {
 		parent.Close()
 		return nil, fmt.Errorf("no system CPLD at %#02x behind mux channel %d on %s: %w. "+
-			"If this is a new unit, mux_parent and psu_bus in board.yml may be the other way round",
+			"Check mux_parent in board.yml against the unit's /sys/bus/i2c/devices",
 			cpldSystem, chSystem, d.MuxParent, err)
 	}
 	if h.psu, err = openBus(d.PSUBus); err != nil {
