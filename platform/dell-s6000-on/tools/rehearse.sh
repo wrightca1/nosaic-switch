@@ -19,7 +19,7 @@ if [ -n "$ISO" ]; then
 fi
 cd "$ROOT"
 exec docker run --rm --network host -v "$ROOT:/src" -w /src $MOUNT_ISO nosaic/builder:0.1 \
-    python3 -u platform/dell-s6000-on/tools/rehearse.py "$@" \
+    python3 -B -u platform/dell-s6000-on/tools/rehearse.py "$@" \
         --netboot "$IMG/netboot" \
         --installer "$(ls $IMG/NOSaic-*-dell-s6000-on.bin 2>/dev/null | head -1)" \
         --squashfs "$(ls $IMG/*.sqsh $IMG/rootfs.squashfs 2>/dev/null | head -1)" \

@@ -69,8 +69,9 @@ ONIE then reboots the switch.
 ## First boot
 
 The GRUB menu offers **NOSaic <version>** (the default) and ONIE's entries.
-NOSaic boots from slot A. Log in as `root` on the console. There is no password
-until you set one with `passwd`.
+NOSaic boots from slot A. Log in as `admin` on the console. There is no
+password until you set one with `passwd`. There is no `root` login; prefix
+commands that need root with `doas`.
 
 ## Upgrading
 
@@ -78,9 +79,9 @@ On the running switch, name the whole disk. The slot is found on it by
 partition name, and the boot pointer on the mounted boot partition is updated:
 
 ```
-nosaic upgrade install /tmp/new.sqsh --disk /dev/sda
-reboot
-nosaic upgrade commit        # once the new slot is running and healthy
+doas nosaic upgrade install /tmp/new.sqsh --disk /dev/sda
+doas reboot
+doas nosaic upgrade commit   # once the new slot is running and healthy
 ```
 
 An upgrade does not replace the kernel yet. It stays on `nosaic-boot`.

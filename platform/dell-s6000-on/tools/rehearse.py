@@ -108,6 +108,15 @@ class VM:
         self.log.close()
 
 
+PROMPT = r"[$#] $"
+
+
+def login(vm):
+    """Log in the way an operator does: admin, no password as shipped."""
+    vm.line("admin")
+    vm.expect(PROMPT, 120)
+
+
 def serve(directory):
     """Serve a directory over HTTP for the guest, from inside the container."""
     handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=directory, **k)
@@ -151,12 +160,31 @@ def sparse_copy(src, dst):
     subprocess.check_call(["cp", "--sparse=always", src, dst])
 
 
-def digest(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def regions(disk):
+    """Hash each partition and the gaps around them, keyed by name."""
+    parts = partitions(disk)
+    out = {"(MBR and GPT)": (0, parts[0]["start"] * 512)}
+    for p in parts:
+        out[p.get("name") or "part@%d" % p["start"]] = (p["start"] * 512, (p["start"] + p["size"]) * 512)
+    out["(after the last partition)"] = (max(e for _, e in out.values()), os.path.getsize(disk))
+    res = {}
+    with open(disk, "rb") as f:
+        for name, (s, e) in out.items():
+            h = hashlib.sha256()
+            f.seek(s)
+            left = e - s
+            while left > 0:
+                b = f.read(min(left, 1 << 20))
+                if not b:
+                    break
+                h.update(b)
+                left -= len(b)
+            res[name] = h.hexdigest()
+    return res
+
+
+def changed(before, after):
+    return sorted(n for n in set(before) | set(after) if before.get(n) != after.get(n))
 
 
 def step(msg):
@@ -243,9 +271,31 @@ def fresh_disk(a, name):
 
 
 # ── netboot ──────────────────────────────────────────────────────────────────
+def t_control(a):
+    """Boot ONIE, stop discovery, and do nothing else: what ONIE writes itself."""
+    disk = fresh_disk(a, "control-disk.raw")
+    before = regions(disk)
+    step("control: boot ONIE and do nothing, to see what ONIE writes on its own")
+    vm = VM(qemu(disk=disk), os.path.join(a.out, "control.log"))
+    try:
+        onie_prompt(vm)
+        vm.line("sync")
+        vm.expect(r"ONIE:/ #", 60)
+        time.sleep(5)
+    finally:
+        vm.stop()
+    diff = changed(before, regions(disk))
+    ok("ONIE on its own changed: %s" % (diff or "nothing"))
+    return diff
+
+
 def t_netboot(a):
+    # ONIE writes its own state into ONIE-BOOT on every boot, whatever runs
+    # after it; the control run measures exactly what. The netboot must change
+    # nothing beyond that.
+    allowed = set(t_control(a))
     disk = fresh_disk(a, "netboot-disk.raw")
-    before = digest(disk)
+    before = regions(disk)
     bins = [f for f in os.listdir(a.netboot) if f.endswith("-netboot.bin")]
     if not bins:
         raise Fail("no *-netboot.bin in %s" % a.netboot)
@@ -265,9 +315,14 @@ def t_netboot(a):
     finally:
         vm.stop()
         httpd.shutdown()
-    if digest(disk) != before:
-        raise Fail("the disk changed during a netboot; nothing should have been written")
-    ok("the disk is byte-for-byte unchanged")
+        httpd.server_close()
+    diff = changed(before, regions(disk))
+    extra = [n for n in diff if n not in allowed]
+    if extra:
+        raise Fail("the netboot changed %s, beyond what ONIE itself writes (%s)"
+                   % (extra, sorted(allowed) or "nothing"))
+    ok("the disk is unchanged beyond ONIE's own writes (%s changed, as in the control)"
+       % (", ".join(diff) or "nothing"))
 
 
 # ── install ──────────────────────────────────────────────────────────────────
@@ -288,7 +343,7 @@ def t_install(a):
         ok("the installer finished")
         vm.expect(r"NOSaic ", 600)  # the GRUB menu entry, after ONIE reboots
         ok("our GRUB menu came up after the reboot")
-        vm.expect(r"NOSAIC-BOOT slotdev=(\S+)", 900)
+        vm.expect(r"NOSAIC-BOOT slotdev=(\S+)\s", 900)
         slotdev = re.search(r"NOSAIC-BOOT slotdev=(\S+)", vm.buf.decode("utf-8", "replace")).group(1)
         vm.expect(r"login:", 900)
         ok("NOSaic booted from disk (slot a is %s)" % slotdev)
@@ -316,26 +371,43 @@ def t_install(a):
     # A/B: write slot b from the running switch, and check it landed on
     # nosaic-slot-b rather than on whatever is third on the disk.
     step("A/B upgrade into slot b from the running system")
+    # One server at a time on PORT: the installer's goes before this one.
+    httpd.shutdown()
+    httpd.server_close()
     httpd2 = serve(os.path.dirname(a.squashfs))
     vm = VM(qemu(disk=disk), os.path.join(a.out, "upgrade.log"))
     try:
         vm.expect(r"login:", 1500)
-        vm.line("root")
-        vm.expect(r"# ", 120)
+        login(vm)
+        # Services are still starting and printing; let the console settle
+        # so the commands below are not interleaved with their output.
+        time.sleep(20)
+        vm.line("")
+        vm.expect(PROMPT, 60)
+        # NOSaic configures management from network.conf, which a fresh
+        # install does not have. QEMU's user network is 10.0.2.0/24.
+        # doas runs with a short PATH, and admin's own PATH has no /sbin, so
+        # tools are named by full path, found with w().
+        vm.line("w() { for d in /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do "
+                "[ -x $d/$1 ] && { echo $d/$1; return; }; done; }; echo W=ok")
+        vm.expect(r"W=ok", 60)
+        vm.line("I=$(ls /sys/class/net | grep -v '^lo$' | head -1); IP=$(w ip); "
+                "doas $IP link set $I up && doas $IP addr add 10.0.2.15/24 dev $I; echo NET=$?")
+        vm.expect(r"NET=0", 60, fail=(r"NET=[1-9]",))
         # --disk names the whole disk: the slot is found on it by name, and
         # the boot pointer is the mounted one (upgrade.Disk.State).
         vm.line("D=$(awk '$4 ~ /^[sv]da$/ {print \"/dev/\"$4; exit}' /proc/partitions); "
                 "wget -O /tmp/new.sqsh http://%s:%d/%s && "
-                "nosaic upgrade install /tmp/new.sqsh --disk $D; echo RC=$?"
+                "doas $(w nosaic) upgrade install /tmp/new.sqsh --disk $D; echo RC=$?"
                 % (HOST, PORT, os.path.basename(a.squashfs)))
         vm.expect(r"RC=0", 900, fail=(r"RC=[1-9]",))
         ok("nosaic upgrade install succeeded")
-        vm.line("sync; poweroff -f")
+        vm.line("sync; doas $(w poweroff) -f")
         time.sleep(10)
     finally:
         vm.stop()
-        httpd.shutdown()
         httpd2.shutdown()
+        httpd2.server_close()
     parts = {p["name"]: p for p in partitions(disk)}
     if not part_bytes(disk, parts["nosaic-slot-b"]).startswith(b"hsqs"):
         raise Fail("nosaic-slot-b does not hold a squashfs after the upgrade")
@@ -348,14 +420,18 @@ def t_install(a):
     step("booting the trial slot, then choosing ONIE from our GRUB menu")
     vm = VM(qemu(disk=disk), os.path.join(a.out, "trial-and-onie.log"))
     try:
-        vm.expect(r"NOSAIC-BOOT slotdev=\S+", 900)
+        # The pointer must actually move: a trial that silently boots slot a
+        # again looks healthy and upgraded nothing.
+        i = vm.expect([r"NOSAIC-BOOT-SLOT b\s", r"NOSAIC-BOOT-SLOT a\s"], 900)
+        if i != 0:
+            raise Fail("the trial boot came up on slot a, not the upgraded slot b")
         vm.expect(r"login:", 900)
-        ok("the trial boot came up")
-        vm.line("root")
-        vm.expect(r"# ", 120)
-        vm.line("nosaic upgrade status")
-        vm.expect(r"# ", 120)
-        vm.line("reboot")
+        ok("the trial boot came up on slot b")
+        login(vm)
+        time.sleep(20)
+        vm.line("nosaic upgrade status; echo ST=$?")
+        vm.expect(r"ST=\d", 120)
+        vm.line("doas $(for d in /usr/sbin /sbin /usr/bin /bin; do [ -x $d/reboot ] && echo $d/reboot && break; done)")
         vm.expect(r"NOSaic ", 600)
         vm.send("\x1b[B")  # down from NOSaic to ONIE's entry
         time.sleep(0.3)

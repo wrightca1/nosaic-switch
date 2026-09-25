@@ -43,7 +43,8 @@ All of this runs off the switch, under QEMU with SeaBIOS standing in for
 Dell's legacy BIOS, and a real ONIE built as `kvm_x86_64` with
 `UEFI_ENABLE=no`. Build that ISO from the
 [ONIE repository](https://github.com/opencomputeproject/onie) with
-`make MACHINE=kvm_x86_64 UEFI_ENABLE=no all recovery-iso`, then:
+`make MACHINE=kvm_x86_64 UEFI_ENABLE=no SECURE_BOOT_ENABLE=no SECURE_BOOT_EXT=no SECURE_GRUB=no all recovery-iso`
+(the S6000 has neither UEFI nor Secure Boot), then:
 
 ```sh
 platform/dell-s6000-on/tools/rehearse.sh ramboot
