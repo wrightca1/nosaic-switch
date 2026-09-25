@@ -28,6 +28,7 @@
 #include "props.h"
 #include "portmode.h"
 #include "sdk.h"
+#include "ledproc.h"
 #include "l3sync.h"
 #include "led.h"
 #include "phy.h"
@@ -153,6 +154,7 @@ static const char *const datapath_conf[] = {
 	"serdes.conf",    /* generated: this board's transmit equalisation */
 	"retimer.conf",   /* generated: tuning for a retimer in front of a cage */
 	"portmode.conf",  /* shipped: which QSFP cages run as 4x10G */
+	"ledproc.conf",   /* generated: the ASIC's LED processor program */
 };
 
 /* Where the switch chip appears once the board controller releases it.
@@ -401,6 +403,7 @@ static int attach(const char *bdf, char **confs, int nconf, int full)
 		if (nosaic_sdk_bcm_init(unit) != 0)
 			return 1;
 		printf("the chip is initialised and running.\n\n");
+		nosaic_ledproc_start(unit);
 		nosaic_props_report_unused();
 		nosaic_sdk_ports(unit);
 	}
@@ -538,6 +541,11 @@ static int run_daemon(const char *bdf, char **confs, int nconf)
 
 	if (nosaic_sdk_bcm_init(unit) != 0)
 		return 1;
+
+	/* The port LEDs, on a board whose ASIC drives them. After bcm_init,
+	 * which resets the LED processors' remap and data RAM, and before the
+	 * unused-property report, which would otherwise list every ledproc_ key. */
+	nosaic_ledproc_start(unit);
 
 	/*
 	 * Which properties the SDK actually read, reported here and not only on

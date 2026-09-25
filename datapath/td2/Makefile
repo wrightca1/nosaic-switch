@@ -68,7 +68,7 @@ CFLAGS  += -DNOSAIC_QUERY_DRIVER=\"td2\" -DNOSAIC_WITH_SDK -I$(SDK_DIR)/include/
 SDK_LIBS = -Wl,--start-group $(wildcard $(SDK_DIR)/lib/openbcm/*.a) -Wl,--end-group
 LDLIBS  += $(SDK_LIBS) -lpthread -lm -lrt
 OBJS    += sdk.o ../common/tapbridge.o ../common/l3sync.o ../common/acl.o \
-	   ../common/query.o led.o phy.o \
+	   ../common/query.o led.o ledproc.o phy.o \
            phybus.o ../scdmdio/scdmdio.o
 endif
 
@@ -86,11 +86,12 @@ strip: nosd-td2
 	$(CROSS_COMPILE)strip $<
 	@echo "    stripped to $$(stat -c%s nosd-td2) bytes"
 
-main.o: main.c bde.h sdk.h ../common/props.h ../common/portmode.h
+main.o: main.c bde.h sdk.h ledproc.h ../common/props.h ../common/portmode.h
 ../common/portmode.o: ../common/portmode.c ../common/portmode.h ../common/props.h
 bde.o: bde.c bde.h
 sdk.o: sdk.c bde.h sdk.h ../common/props.h
 phy.o: phy.c phy.h ../common/props.h
+ledproc.o: ledproc.c ledproc.h ../common/props.h
 phybus.o: phybus.c phybus.h ../scdmdio/scdmdio.h
 ../scdmdio/scdmdio.o: ../scdmdio/scdmdio.c ../scdmdio/scdmdio.h
 ../common/tapbridge.o: ../common/tapbridge.c ../common/tapbridge.h
