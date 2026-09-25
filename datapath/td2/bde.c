@@ -236,6 +236,26 @@ int nosaic_bde_open(struct nosaic_bde *b, const char *bdf)
 		size_t   clen  = 0;
 		int found = dma_from_cmdline(&cbase, &clen) == 0;
 
+		/* ⚠ NO RESERVATION, NO DMA POOL.
+		 *
+		 * The built-in default is an address that was right on one
+		 * board. CONFIG_STRICT_DEVMEM stops it landing in RAM, but
+		 * IO_STRICT_DEVMEM is off, so on a board nobody has mapped
+		 * yet it can land on another device's registers -- and the
+		 * pool's first act is to write list heads into it. Every td2
+		 * board that works states memmap= in board.yml, so the default
+		 * only ever applied to a board being brought up, which is
+		 * exactly where it is most dangerous. */
+		if (!found && getenv("NOSAIC_DMA_BASE") == NULL) {
+			fprintf(stderr,
+				"nosd-td2: no memmap=...$... on /proc/cmdline and no NOSAIC_DMA_BASE;\n"
+				"  refusing to guess where the DMA pool goes. Pick 64M of RAM the\n"
+				"  kernel lists as usable in `dmesg | grep e820`, below 4G, and add\n"
+				"    memmap=64M$<addr> iomem=relaxed\n"
+				"  to kernel_params in this board's board.yml.\n");
+			return -1;
+		}
+
 		b->dma_phys = env_u64("NOSAIC_DMA_BASE",
 				      found ? cbase : DMA_BASE_DEFAULT);
 		b->dma_len  = (size_t)env_u64("NOSAIC_DMA_SIZE",
