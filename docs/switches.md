@@ -51,7 +51,7 @@ switch:
   Run them once against a switch running the vendor's OS, drop the output
   in [config/](../platform/cisco-n3172tq/config/), and it ships in every image you build for that
   board. Full instructions are in that board's README.
-- **dell-s6000-on** — [tools/](../platform/dell-s6000-on/tools/): `mkconf.sh`, `rehearse.py`, `rehearse.sh`
+- **dell-s6000-on** — [tools/](../platform/dell-s6000-on/tools/): `mkconf.sh`, `mkledproc.sh`, `rehearse.py`, `rehearse.sh`
   Run them once against a switch running the vendor's OS, drop the output
   in [config/](../platform/dell-s6000-on/config/), and it ships in every image you build for that
   board. Full instructions are in that board's README.
