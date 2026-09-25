@@ -211,7 +211,17 @@ BEGIN {
         }
         next
     }
-    if (key ~ /^xgxs_/) { pol[nk] = val; next }
+    if (key ~ /^xgxs_/) {
+        pol[nk] = val
+        # A lane map describes the whole core of the cage; the breakout
+        # configs from Dell repeat it on the other three lanes, so do we.
+        if (old in split4)
+            for (i = 1; i < 4; i++) {
+                k2 = substr(key, 1, RSTART) (newlog[old] + i)
+                sub4[k2] = val
+            }
+        next
+    }
     ser[nk] = val
 }
 END {
@@ -243,20 +253,26 @@ END {
             printf "tap_et%d=%d:%d:1500\n", c, L, 1000 + L > f
     }
 
+    # ⚠ CLOSE A FILE BEFORE ANYTHING ELSE APPENDS TO IT. The handle awk
+    # holds keeps its own offset and buffer: a line printed through it after
+    # `sort` appended lands at the stale offset and overwrites what sort
+    # wrote. That silently dropped a broken-out cage lane-1 polarity once.
     f = out "/polarity.conf"
-    print hdr > f
-    for (k in pol) print k "=" pol[k] | "sort >> " out "/polarity.conf"
-    close("sort >> " out "/polarity.conf")
+    print hdr > f; close(f)
+    for (k in pol) print k "=" pol[k] | "sort >> " f
+    close("sort >> " f)
     if (length(sub4) > 0) {
-        print "# Lanes 2-4 of broken-out cages: one bit of the cage mask each." >> f
-        for (k in sub4) print k "=" sub4[k] | "sort >> " out "/polarity.conf"
-        close("sort >> " out "/polarity.conf")
+        print "# Lanes 2-4 of broken-out cages: one bit of the cage mask each," >> f
+        print "# and the lane maps of the cage repeated, as the Dell breakout configs do." >> f
+        close(f)
+        for (k in sub4) print k "=" sub4[k] | "sort >> " f
+        close("sort >> " f)
     }
 
     f = out "/serdes.conf"
-    print hdr > f
-    for (k in ser) print k "=" ser[k] | "sort >> " out "/serdes.conf"
-    close("sort >> " out "/serdes.conf")
+    print hdr > f; close(f)
+    for (k in ser) print k "=" ser[k] | "sort >> " f
+    close("sort >> " f)
 
     f = out "/portmode.conf"
     print hdr > f
