@@ -91,6 +91,17 @@ BCM56850 (the others are 56855 and 56854). There are no external PHYs, so the
 PHY/MDIO bring-up those boards need does not apply. The DMA reservation
 (`memmap=`) has to be read off this board's e820 before nosd can run.
 
+## Port LEDs
+
+Driven by the Trident II's own two LED processors (CMICm `CMIC_LEDUP0/1`),
+not a CPLD. Dell's `led_proc_init.soc` loads the same 132-byte program into
+both and a remap from LED slot to port (52 of 64 slots used per processor):
+LED on at link, blinking on activity. `tools/mkledproc.sh` turns it into
+`ledproc.conf`, and `datapath/td2/ledproc.c` loads and starts both processors
+after `bcm_init`. The program reads link and activity from the hardware scan
+chain, so no linkscan callback is needed. Unverified on hardware: if a cage
+with link stays dark, read `DATA_RAM[2*idx+1]` bit 0 for its LED index.
+
 ## Platform HAL
 
 `internal/platformhal/s6000`, driver `dell-s6000`, all in userspace:

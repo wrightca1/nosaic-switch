@@ -12,8 +12,9 @@ make pkg PKG=linux ARCH=x86_64
 make pkg PKG=openbcm ARCH=x86_64      # 25+ GB of build tree; see below
 make pkg PKG=nosd-td2 ARCH=x86_64
 
-# the per-port tables, into the image (never committed)
+# the per-port tables and the LED program, into the image (never committed)
 platform/dell-s6000-on/tools/mkconf.sh <td2-s6000-32x40G.config.bcm> platform/dell-s6000-on/config
+platform/dell-s6000-on/tools/mkledproc.sh <led_proc_init.soc> platform/dell-s6000-on/config
 
 make netboot BOARD=dell-s6000-on      # the RAM-only kexec bundle
 make image   BOARD=dell-s6000-on      # the installer -- build it last
