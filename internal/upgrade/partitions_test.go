@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -137,5 +138,64 @@ size=8MiB, type=linux, name="nosaic-data"
 	}
 	if strings.TrimSpace(st["trial"]) != "b" {
 		t.Errorf("the mounted pointer has trial %q, want b", st["trial"])
+	}
+}
+
+// The running switch has no sfdisk; the table comes from sysfs. A fake tree
+// shaped like the S6000's: ONIE's two partitions, then ours, listed out of
+// order and with a non-partition directory mixed in.
+func TestSysfsPartitionsReadsNamesStartsAndSizes(t *testing.T) {
+	root := t.TempDir()
+	old := sysBlock
+	sysBlock = root
+	t.Cleanup(func() { sysBlock = old })
+
+	disk := filepath.Join(root, "sda")
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(filepath.Join(disk, "queue"), 0o755))
+	for _, p := range []struct {
+		n           int
+		start, size int64
+		name        string
+	}{
+		{4, 3000, 2000, "nosaic-slot-a"},
+		{1, 2048, 2048, "GRUB-BOOT"},
+		{6, 7000, 1000, "nosaic-data"},
+		{2, 4096, 262144, "ONIE-BOOT"},
+		{5, 5000, 2000, "nosaic-slot-b"},
+		{3, 2500, 500, "nosaic-boot"},
+	} {
+		d := filepath.Join(disk, fmt.Sprintf("sda%d", p.n))
+		must(os.MkdirAll(d, 0o755))
+		must(os.WriteFile(filepath.Join(d, "partition"), []byte(fmt.Sprintf("%d\n", p.n)), 0o644))
+		must(os.WriteFile(filepath.Join(d, "start"), []byte(fmt.Sprintf("%d\n", p.start)), 0o644))
+		must(os.WriteFile(filepath.Join(d, "size"), []byte(fmt.Sprintf("%d\n", p.size)), 0o644))
+		must(os.WriteFile(filepath.Join(d, "uevent"),
+			[]byte(fmt.Sprintf("MAJOR=8\nMINOR=%d\nDEVNAME=sda%d\nDEVTYPE=partition\nPARTN=%d\nPARTNAME=%s\n", p.n, p.n, p.n, p.name)), 0o644))
+	}
+	// The device node the caller names; only its base name matters.
+	dev := filepath.Join(t.TempDir(), "sda")
+	must(os.WriteFile(dev, nil, 0o644))
+
+	parts, err := sysfsPartitions(dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GRUB-BOOT", "ONIE-BOOT", "nosaic-boot", "nosaic-slot-a", "nosaic-slot-b", "nosaic-data"}
+	if len(parts) != len(want) {
+		t.Fatalf("got %d partitions, want %d: %+v", len(parts), len(want), parts)
+	}
+	for i, n := range want {
+		if parts[i].Name != n {
+			t.Errorf("partition %d is %q, want %q", i+1, parts[i].Name, n)
+		}
+	}
+	if parts[3].Start != 3000 || parts[3].Size != 2000 {
+		t.Errorf("nosaic-slot-a is %+v, want start 3000 size 2000", parts[3])
 	}
 }

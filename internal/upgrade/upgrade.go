@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -80,7 +81,21 @@ type partition struct {
 	Name  string `json:"name"`
 }
 
+// sysBlock is where the kernel describes block devices. A variable so tests
+// can hand it a fake tree.
+var sysBlock = "/sys/class/block"
+
 func (d Disk) partitions() ([]partition, error) {
+	// A block device on a running switch is read from sysfs, not sfdisk.
+	//
+	// ⚠ THE IMAGE DOES NOT SHIP sfdisk. So `upgrade install --disk /dev/sda`
+	// failed on every partitioned board the moment it looked at the table --
+	// found by the S6000 rehearsal, the first time it ran on a switch rather
+	// than on an image file. The kernel already knows every partition's start,
+	// size and GPT name, and says so without any tool.
+	if fi, err := os.Stat(d.Path); err == nil && fi.Mode()&os.ModeDevice != 0 {
+		return sysfsPartitions(d.Path)
+	}
 	out, err := exec.Command("sfdisk", "--json", d.Path).Output()
 	if err != nil {
 		return nil, fmt.Errorf("reading the partition table of %s: %w", d.Path, err)
@@ -94,6 +109,67 @@ func (d Disk) partitions() ([]partition, error) {
 		return nil, err
 	}
 	return doc.PartitionTable.Partitions, nil
+}
+
+// sysfsPartitions lists a disk's partitions as the kernel sees them, in
+// partition-number order. start and size are in 512-byte sectors in sysfs
+// whatever the device's own sector size, which is what sfdisk reports too.
+func sysfsPartitions(dev string) ([]partition, error) {
+	real, err := filepath.EvalSymlinks(dev)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(sysBlock, filepath.Base(real))
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading the partitions of %s from sysfs: %w", dev, err)
+	}
+	type numbered struct {
+		n int
+		p partition
+	}
+	var found []numbered
+	for _, e := range ents {
+		pd := filepath.Join(dir, e.Name())
+		num, err := readSysInt(filepath.Join(pd, "partition"))
+		if err != nil {
+			continue // not a partition: queue/, holders/, and so on
+		}
+		start, err := readSysInt(filepath.Join(pd, "start"))
+		if err != nil {
+			return nil, err
+		}
+		size, err := readSysInt(filepath.Join(pd, "size"))
+		if err != nil {
+			return nil, err
+		}
+		name := ""
+		if ue, err := os.ReadFile(filepath.Join(pd, "uevent")); err == nil {
+			for _, line := range strings.Split(string(ue), "\n") {
+				if v, ok := strings.CutPrefix(line, "PARTNAME="); ok {
+					name = v
+				}
+			}
+		}
+		found = append(found, numbered{int(num), partition{Start: start, Size: size, Name: name}})
+	}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("%s has no partitions in sysfs", dev)
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].n < found[j].n })
+	out := make([]partition, len(found))
+	for i, f := range found {
+		out[i] = f.p
+	}
+	return out, nil
+}
+
+func readSysInt(path string) (int64, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
 }
 
 // partNames is NOSaic's layout in index order: bootIndex, then slotIndex's.
