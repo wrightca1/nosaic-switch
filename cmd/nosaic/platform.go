@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	// honest about what exists.
 	_ "github.com/salvaged-silicon/nosaic-switch/internal/platformhal/as4610"
 	_ "github.com/salvaged-silicon/nosaic-switch/internal/platformhal/n3172tq" // registers the "n3172tq" driver
+	_ "github.com/salvaged-silicon/nosaic-switch/internal/platformhal/s6000"   // registers the "dell-s6000" driver
 	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal/scd"
 	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal/sff"
 )
@@ -27,6 +29,7 @@ const platformUsage = `usage: nosaic platform <command>
   status               what the board reports about itself
   mac                  the board's own base MAC, from its identity PROM
   release-asic         take the switch chip out of reset and wait for it
+  power-cycle          reboot by cutting board power, on a board that needs it
   asic                 what the switch chip says about itself (read-only)
   transceivers         which front-panel cages have modules in them
   retimer [--program]  the signal repeater in front of some cages
@@ -79,6 +82,8 @@ func platformCmd(args []string) error {
 		return platformStatus(hal, b)
 	case "release-asic":
 		return releaseASIC(hal)
+	case "power-cycle":
+		return powerCycle(hal)
 	case "asic":
 		return probeASIC(hal)
 	case "smbus":
@@ -189,12 +194,37 @@ func openFor(b *board.Board) (platformhal.HAL, *board.Board, error) {
 		SMBus:     b.PlatformHAL.SMBus,
 		Cages:     b.PlatformHAL.Cages,
 		Resets:    b.PlatformHAL.Resets,
-		BoardData: b.PlatformHAL.N3172TQ,
+		BoardData: boardData(b),
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return hal, b, nil
+}
+
+// boardData is the driver's own block from board.yml, for the driver that
+// has one. By driver, so a board carrying two blocks cannot hand one driver
+// the other's addresses.
+func boardData(b *board.Board) any {
+	switch b.PlatformHAL.Driver {
+	case "dell-s6000":
+		return b.PlatformHAL.DellS6000
+	case "n3172tq":
+		return b.PlatformHAL.N3172TQ
+	}
+	return nil
+}
+
+// powerCycle reboots a board whose reboot has to cut power through its own
+// controller. sync first: nothing after the write runs.
+func powerCycle(hal platformhal.HAL) error {
+	p, ok := hal.(interface{ PowerCycle() error })
+	if !ok {
+		return fmt.Errorf("%w: this board's platform driver cannot power-cycle it",
+			platformhal.ErrUnsupported)
+	}
+	syscall.Sync()
+	return p.PowerCycle()
 }
 
 func platformStatus(hal platformhal.HAL, b *board.Board) error {
@@ -278,6 +308,37 @@ func platformStatus(hal platformhal.HAL, b *board.Board) error {
 
 	if r, ok := hal.(interface{ PSURaw() uint32 }); ok {
 		fmt.Fprintf(w, "psu register\t%#08x\n", r.PSURaw())
+	}
+	if c, ok := hal.(interface{ CPLDVersions() (string, error) }); ok {
+		if v, err := c.CPLDVersions(); err != nil {
+			fmt.Fprintf(w, "cplds\t— %v\n", err)
+		} else {
+			fmt.Fprintf(w, "cplds\t%s\n", v)
+		}
+	}
+	if h, ok := hal.(interface {
+		PSUHealthy() (map[string]bool, error)
+	}); ok {
+		if ok, err := h.PSUHealthy(); err == nil {
+			for _, n := range sortedKeys(ok) {
+				if !ok[n] {
+					fmt.Fprintf(w, "psu %s health\tFAILED OR ABSENT\n", n)
+				}
+			}
+		}
+	}
+	if c, ok := hal.(interface{ CagesPresent() ([32]bool, error) }); ok {
+		if cages, err := c.CagesPresent(); err != nil {
+			fmt.Fprintf(w, "cages\t— %v\n", err)
+		} else {
+			var in []string
+			for i, p := range cages {
+				if p {
+					in = append(in, fmt.Sprint(i+1))
+				}
+			}
+			fmt.Fprintf(w, "cages occupied\t%d of 32 %v\n", len(in), in)
+		}
 	}
 	if psus, err := hal.PSUPresent(); err != nil {
 		fmt.Fprintf(w, "psu\t— %v\n", err)

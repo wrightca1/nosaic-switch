@@ -29,10 +29,44 @@ profile: minimal  # full | slim | minimal
 kernel: ""                   # empty means the fleet default
 
 # The boot partition holds the kernel, initramfs and GRUB here, not only
-# the slot pointer. The disk is 16 GB, so nothing needs squeezing.
+# the slot pointer. The disk is a CFast card behind a Marvell 88SE9170
+# (AHCI, so /dev/sda); its size is not recorded yet -- the Step 2 log of the
+# first unit will say. The layout needs about 3.1 GiB beside ONIE.
 boot_mib: 64
 slot_mib: 1024
 data_mib: 1024
+
+# ── Platform HAL ────────────────────────────────────────────────────────────
+#
+# A userspace driver (internal/platformhal/s6000): it drives the GPIO-selected
+# i2c mux and the CPLDs itself and reads every sensor directly, so NO kernel
+# hwmon driver may be bound behind the mux. See that package's doc.
+#
+# ⚠ WHICH iSMT FUNCTION IS WHICH IS NOT MEASURED YET. ONIE reaches the system
+# CPLD on its first adapter after setting the mux GPIOs, which suggests the
+# first function, 00:13.0, is the mux parent; nothing more direct is known.
+# The driver checks by reading the system CPLD at open and, if it is not
+# there, says to swap these two. The first unit's `ls -l
+# /sys/bus/i2c/devices` settles it.
+platform_hal:
+  driver: dell-s6000
+  dell_s6000:
+    mux_parent: "0000:00:13.0"
+    psu_bus: "0000:00:13.1"
+    gpio_chip: sch_gpio
+    # Dell's fancontrol.sh idles at 7000 of 19000 RPM (37%).
+    fan_floor_percent: 40
+
+# The cooling band, against the hottest of the tmp75s, the S1220's dies and
+# the DIMM. Dell's limits are 80 °C on the board sensors (sensors.conf) and
+# 85 °C critical on the CPU and DIMM; full fan well before either. Not
+# measured on a unit: the first run's `nosaic platform thermal --once` output
+# is what to tune this against.
+thermal:
+  min_c: 45
+  max_c: 70
+  slew_down_percent: 5
+  interval_seconds: 10
 
 status: planned              # planned | bringup | experimental | production
 

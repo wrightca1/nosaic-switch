@@ -18,6 +18,7 @@ import (
 	"github.com/salvaged-silicon/nosaic-switch/internal/boot"
 	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal"
 	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal/n3172tq"
+	"github.com/salvaged-silicon/nosaic-switch/internal/platformhal/s6000"
 )
 
 // Status is how far a port has got, and it is stated rather than filtered on.
@@ -339,6 +340,9 @@ func (b *Board) Validate(root string) []string {
 	if err := b.PlatformHAL.N3172TQ.Validate(); err != nil {
 		bad("platform_hal.n3172tq: %s", err)
 	}
+	if err := b.PlatformHAL.DellS6000.Validate(); err != nil {
+		bad("platform_hal.dell_s6000: %s", err)
+	}
 
 	// A parameter nothing will read is worse than no parameter: it looks like
 	// the box was configured. The symptom is a kernel booting without a
@@ -445,6 +449,9 @@ type PlatformHAL struct {
 	// driver's type. Board-specific on purpose: nothing here is shared with
 	// another board's HAL, so neither board constrains the other.
 	N3172TQ *n3172tq.Data `yaml:"n3172tq"`
+	// DellS6000 is the Dell S6000-ON driver's own data: which iSMT function is
+	// which, and the GPIO chip carrying the mux lines.
+	DellS6000 *s6000.Data `yaml:"dell_s6000"`
 }
 
 // Thermal is a board's cooling curve.

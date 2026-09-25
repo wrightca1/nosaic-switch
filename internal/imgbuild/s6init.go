@@ -194,7 +194,7 @@ func writeS6(o Options, rootfs string, services ...svcgen.Service) error {
 	if err := writeFile(rootfs, "/sbin/init", s6Init, 0o755); err != nil {
 		return err
 	}
-	if err := writeFile(rootfs, "/etc/nosaic/shutdown.sh", shutdownScript, 0o755); err != nil {
+	if err := writeFile(rootfs, "/etc/nosaic/shutdown.sh", shutdownScriptFor(o), 0o755); err != nil {
 		return err
 	}
 
@@ -284,6 +284,7 @@ s6-rc -t 15000 -da change 2>&1 || echo "NOSAIC-S6-WARN services did not all stop
 
 sync
 
+%s
 # The kernel directly. -f skips signalling init, which is us.
 case "$action" in
     poweroff) exec busybox poweroff -f ;;
@@ -291,3 +292,27 @@ case "$action" in
     *)        exec busybox reboot -f   ;;
 esac
 `
+
+// powerCycleReboot names the platform drivers on whose boards a reboot must
+// be a power cycle through the board's own controller.
+//
+// ⚠ ON THESE BOARDS A CPU RESET IS NOT A REBOOT. The Dell S6000-ON's Trident
+// II keeps its state across a warm reset and comes back unusable; Dell's ONIE
+// and SONiC both replace reboot with the CPLD write for that reason. The
+// kernel reboot below stays as the fallback, so a HAL that cannot reach its
+// controller still restarts the box rather than hanging it.
+var powerCycleReboot = map[string]bool{"dell-s6000": true}
+
+const powerCycleStep = `if [ "$action" = reboot ]; then
+    echo "NOSAIC-S6 rebooting by power cycle through the board controller"
+    nosaic platform power-cycle || echo "NOSAIC-S6-WARN power cycle failed; falling back to a CPU reset"
+fi
+`
+
+func shutdownScriptFor(o Options) string {
+	step := ""
+	if o.Board != nil && powerCycleReboot[o.Board.PlatformHAL.Driver] {
+		step = powerCycleStep
+	}
+	return fmt.Sprintf(shutdownScript, step)
+}
