@@ -300,3 +300,21 @@ func TestVerboseOneshotStillRedirects(t *testing.T) {
 		t.Errorf("verbose oneshot does not capture its output:\n%s", up)
 	}
 }
+
+// A service that cannot start must not flood the console: one breadcrumb per
+// boot, and a pause between failed starts like systemd's RestartSec.
+func TestS6FailingLongrunIsQuietAndBacksOff(t *testing.T) {
+	files := gen(t, s6{}, Service{Name: "thermal", Exec: "/usr/bin/nosaic platform thermal",
+		Restart: "always", Verbose: true})
+	run := files["/etc/s6-rc/source/thermal/run"]
+	if !strings.Contains(run, "/run/nosaic-said-thermal") {
+		t.Errorf("the console breadcrumb is not limited to once per boot:\n%s", run)
+	}
+	fin, ok := files["/etc/s6-rc/source/thermal/finish"]
+	if !ok {
+		t.Fatal("no finish script, so a failing service restarts about once a second")
+	}
+	if !strings.Contains(fin, `[ "$1" = 0 ] || sleep 4`) {
+		t.Errorf("finish does not back off after a failure:\n%s", fin)
+	}
+}
