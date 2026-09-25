@@ -294,7 +294,7 @@ func (o onieGRUB) Wrap(img Image, outDir string, log io.Writer) (string, error) 
 			return "", err
 		}
 	}
-	cfg := fmt.Sprintf(grubEntry, img.Version, img.KernelParams)
+	cfg := fmt.Sprintf(grubEntry, img.Version, grubEscape(img.KernelParams))
 	if err := os.WriteFile(filepath.Join(work, "grub.cfg"), []byte(cfg), 0o644); err != nil {
 		return "", err
 	}
@@ -374,4 +374,14 @@ func extractGz(disk string, p gptPart, dst string) error {
 	defer os.Remove(tmp)
 	_, err = gzipFile(tmp, dst)
 	return err
+}
+
+// grubEscape protects a kernel command line inside a grub.cfg linux line.
+//
+// ⚠ GRUB EXPANDS $ THERE. The DMA reservation is written memmap=64M$<addr>,
+// and unescaped GRUB reads $<addr> as a variable, finds nothing, and hands
+// the kernel memmap=64M -- a setting that is wrong rather than missing. A
+// backslash makes GRUB pass the next character through as itself.
+func grubEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `$`, `\$`).Replace(s)
 }

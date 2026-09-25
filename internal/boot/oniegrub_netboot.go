@@ -98,7 +98,7 @@ Copy vmlinuz and initrd.img to a USB stick (ext2 or FAT), press 'c' at the
 GRUB menu, then:
 
     ls                                  # find the stick, e.g. (hd1,msdos1)
-    linux  (hd1,msdos1)/vmlinuz console=ttyS0,<baud>n8 <contents of cmdline>
+    linux  (hd1,msdos1)/vmlinuz console=ttyS0,<baud>n8 <contents of cmdline, every $ written \$>
     initrd (hd1,msdos1)/initrd.img
     boot
 

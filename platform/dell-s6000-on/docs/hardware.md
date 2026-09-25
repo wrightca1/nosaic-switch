@@ -20,6 +20,22 @@ image for this board. **None of it has been observed under NOSaic yet.**
 | GPIO | S1200 PCU GPIO through `lpc_sch` / `gpio-sch` |
 | Management | three CPLDs on i2c: system `0x31`, master `0x32`, slave `0x33` |
 
+## Read off a unit
+
+From gmrproxsw02 running SONiC 202012 (read-only commands):
+
+| | |
+|---|---|
+| ASIC | `01:00.0` BCM56850_A2 (rev 03), BAR0 `0xff600000` 256 KB, INTx IRQ 21, MSI capable; PCIe Gen2 x2, max payload 128 |
+| Usable RAM below 4 GB | `0x00100000`-`0xbed0cfff` (e820); SONiC's kernel BDE put its 32 MB DMA pool at `0xb8c00000` |
+| Disk | CFast 3IE, 16 GB GPT: `GRUB-BOOT` 2 MB, `ONIE-BOOT` 128 MB, `PLATFORM-DIAG` 300 MB (Dell diagnostics), `SONiC-OS` 14.5 GB |
+| GPIO | one chip, `sch_gpio.3168`, 30 lines; the mux uses lines 1, 2 and 10 |
+| CPLDs | system `0xa`, master `0xc`, slave `0xa` |
+| PSUs | 2 x Dell `02RH8M` (DPS-460), status register `0x22` for both: present, not failed, power good |
+| Idle thermals | board tmp75s 29-34 C, CPU 28-32 C, DIMM 31 C; fans 10031 rpm (52%), PSU fans ~15000 rpm |
+| Ports under SONiC | pause off, **software** linkscan, autoneg off, 40G interface **XGMII**, max frame 9122 |
+| LED processors | running: `bcmcmd "led status"` maps each xe port to a processor and LED index |
+
 ## Block diagram
 
 ```

@@ -230,3 +230,22 @@ func TestONIEGRUBNetbootRequiresRAMBoot(t *testing.T) {
 		t.Fatalf("want a refusal naming --ram-boot, got %v", err)
 	}
 }
+
+// memmap=64M$0xb0000000 is the S6000's DMA reservation, and GRUB would eat
+// the $ and everything after it.
+func TestGRUBEscapesTheDMAReservation(t *testing.T) {
+	img, dir := gptFixture(t, 8)
+	img.KernelParams = "reboot=p memmap=64M$0xb0000000 iomem=relaxed"
+	b, _ := For("onie-grub")
+	out, err := b.Wrap(img, dir, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := string(member(t, out, "grub.cfg"))
+	if !strings.Contains(cfg, `memmap=64M\$0xb0000000`) {
+		t.Errorf("grub.cfg does not escape the $:\n%s", cfg)
+	}
+	if got := grubEscape(`a\b$c`); got != `a\\b\$c` {
+		t.Errorf("grubEscape: %q", got)
+	}
+}

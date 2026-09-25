@@ -769,6 +769,31 @@ static int port_is_40g(int unit, int port)
 	return v != NULL && atoi(v + 1) == 40;
 }
 
+/* Per-board port policy, from nosaic_* properties. Read by
+ * nosaic_sdk_port_policy() after bcm_init, so the properties are marked used
+ * before the unused-property report -- which would otherwise tell the
+ * operator they have no effect -- and applied by nosaic_sdk_ports(). */
+static struct {
+	int pause_off;      /* nosaic_pause=off */
+	int linkscan_sw;    /* nosaic_linkscan_mode=sw */
+	int rx_los;         /* nosaic_rx_los=1 */
+	int keep_interface; /* nosaic_port_interface=keep */
+} port_policy;
+
+void nosaic_sdk_port_policy(void)
+{
+	const char *v;
+
+	port_policy.pause_off = (v = nosaic_props_get("nosaic_pause")) != NULL &&
+				strcmp(v, "off") == 0;
+	port_policy.linkscan_sw = (v = nosaic_props_get("nosaic_linkscan_mode")) != NULL &&
+				  strcmp(v, "sw") == 0;
+	port_policy.rx_los = (v = nosaic_props_get("nosaic_rx_los")) != NULL &&
+			     strcmp(v, "1") == 0;
+	port_policy.keep_interface = (v = nosaic_props_get("nosaic_port_interface")) != NULL &&
+				     strcmp(v, "keep") == 0;
+}
+
 static void bring_up_40g(int unit, bcm_port_t port)
 {
 	int rv, smax = 0, nlanes = 0;
@@ -894,7 +919,13 @@ static void bring_up_40g(int unit, bcm_port_t port)
 		 * them is ours to second-guess; the sibling board reached the same
 		 * conclusion the hard way and stopped writing this at all.
 		 */
-		if (bcm_port_interface_get(unit, port, &have_if) == BCM_E_NONE &&
+		/* A board that says so keeps the SDK's choice: the S6000's 40G
+		 * ports are XGMII under SONiC, and SAI never changes it. */
+		if (port_policy.keep_interface) {
+			if (bcm_port_interface_get(unit, port, &have_if) == BCM_E_NONE)
+				printf("port %d: interface %d kept, as the board asks\n",
+				       port, have_if);
+		} else if (bcm_port_interface_get(unit, port, &have_if) == BCM_E_NONE &&
 		    !if_is_40g(have_if)) {
 			/* Not a 40G interface at all, which is a real mismatch. SR4
 			 * rather than a generic choice because that is what this
@@ -964,28 +995,6 @@ static void report_phy(int unit, int port, const char *what)
 	printf("phy: port %d (%s) addr %#04x driver %s\n",
 	       port, what, addr,
 	       (name != NULL && *name != '\0') ? name : "NONE -- no external PHY bound");
-}
-
-/* Per-board port policy, from nosaic_* properties. Read by
- * nosaic_sdk_port_policy() after bcm_init, so the properties are marked used
- * before the unused-property report -- which would otherwise tell the
- * operator they have no effect -- and applied by nosaic_sdk_ports(). */
-static struct {
-	int pause_off;      /* nosaic_pause=off */
-	int linkscan_sw;    /* nosaic_linkscan_mode=sw */
-	int rx_los;         /* nosaic_rx_los=1 */
-} port_policy;
-
-void nosaic_sdk_port_policy(void)
-{
-	const char *v;
-
-	port_policy.pause_off = (v = nosaic_props_get("nosaic_pause")) != NULL &&
-				strcmp(v, "off") == 0;
-	port_policy.linkscan_sw = (v = nosaic_props_get("nosaic_linkscan_mode")) != NULL &&
-				  strcmp(v, "sw") == 0;
-	port_policy.rx_los = (v = nosaic_props_get("nosaic_rx_los")) != NULL &&
-			     strcmp(v, "1") == 0;
 }
 
 int nosaic_sdk_ports(int unit)

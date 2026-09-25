@@ -72,11 +72,13 @@ platform_hal:
 #     <=25 C  7000 rpm   26-44 C 10000   45-59 C 13000   60-79 C 16000
 #     >=80 C 19000 rpm, and a software shutdown ("Thermal Overload")
 # with 16200 rpm if any tray reads under 1000 rpm, and 15000 rpm at boot.
-# This band reads the HOTTEST sensor, CPU dies included, which run warmer than
-# the board average; hence starting it higher than Dell's steps.
+# Measured on gmrproxsw02 under SONiC: board sensors 29-34 C, CPU 28-32 C,
+# DIMM 31 C, fans at 10031 rpm (52%). This band reads the hottest sensor and
+# ramps linearly from the 40% floor at 25 C to 100% at 75 C: ~51% at that
+# box's 34 C and ~82% at 60 C, against Dell's 10000 and 16000 rpm steps.
 thermal:
-  min_c: 45
-  max_c: 70
+  min_c: 25
+  max_c: 75
   slew_down_percent: 5
   interval_seconds: 10
 
@@ -90,7 +92,15 @@ status: planned              # planned | bringup | experimental | production
 # power cycle in shutdown cannot run. intel_iommu=off: off by default in this
 # kernel already, stated because the userspace BDE hands the ASIC physical
 # addresses and an IOMMU turned on later would break DMA silently.
-kernel_params: "processor.max_cstate=1 intel_idle.max_cstate=0 reboot=p intel_iommu=off iomem=relaxed"
+#
+# memmap=64M$0xb0000000: the DMA pool nosd-td2 claims through /dev/mem, read
+# off a unit's own e820 (gmrproxsw02, SONiC 202012):
+#   BIOS-e820: [mem 0x0000000000100000-0x00000000bed0cfff] usable
+# 64 MB at 0xb0000000 is inside that, below 4 GB (the SDK here has no 64-bit
+# DMA), and clear of the kernel, which sits above 4 GB. SONiC's kernel BDE
+# put its 32 MB at 0xb8c00000 on the same box; any usable range will do.
+# The onie-grub backend escapes the $ for GRUB.
+kernel_params: "processor.max_cstate=1 intel_idle.max_cstate=0 reboot=p intel_iommu=off memmap=64M$0xb0000000 iomem=relaxed"
 
 notes: >
   Dell S6000-ON: Intel Atom S1220, BCM56850 Trident2 (14e4:b850 at 01:00.0),
