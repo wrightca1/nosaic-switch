@@ -660,7 +660,17 @@ for r in /etc/s6-rc/source/*/run /etc/systemd/system/*.service; do
     # needs. Getting that wrong produced a check that parsed nothing, found
     # nothing missing, and reported "all 0 declared services" -- passing
     # exactly as loudly as a real one.
-    prog=$(sed -nE "s#^(exec|ExecStart=) ?(/[^ ]+).*#\2#p" "$r" | head -1)
+    # The program is the first exec whose word starts like a path or a name:
+    # "exec 2>&1" and "exec >log 2>&1" only redirect, and are skipped.
+    prog=$(sed -nE "s#^(exec|ExecStart=) ?([/A-Za-z_][^ ]*).*#\2#p" "$r" | head -1)
+    # A bare name is run through PATH, exactly as the service's own exec
+    # does -- svcgen writes loggers as "exec s6-log ...", and demanding an
+    # absolute path failed every board with a datapath, whose nosd-log is
+    # the first service that has one.
+    case "$prog" in
+        ""|/*) ;;
+        *) prog=$(command -v "$prog" 2>/dev/null || echo "$prog") ;;
+    esac
     if [ -z "$prog" ]; then
         say "FAIL $r declares no program this check can read"; svc_missing=1; continue
     fi
