@@ -296,6 +296,20 @@ slotdev() {
     esac
     findfs "LABEL=$want" 2>/dev/null && return
 
+    # The GPT partition name, read from the kernel rather than from findfs.
+    #
+    # A squashfs has no filesystem label, so the line above never finds a
+    # slot; on a disk NOSaic owns outright the numeric guess below lands on
+    # the right partition anyway. On an ONIE x86 box it does not: ONIE's
+    # GRUB-BOOT and ONIE-BOOT come first, and "partition 2" is ONIE. The
+    # kernel publishes every GPT name as PARTNAME in the partition's uevent,
+    # which needs nothing from busybox.
+    for _u in /sys/class/block/*/uevent; do
+        grep -qx "PARTNAME=$want" "$_u" 2>/dev/null || continue
+        _n=$(sed -n 's/^DEVNAME=//p' "$_u")
+        [ -b "/dev/$_n" ] && { echo "/dev/$_n"; return; }
+    done
+
     # A slot file on the bootloader's own filesystem, for boards where the
     # bootloader owns the whole disk and there is no room for a partition of
     # ours. Returned as a path rather than a device; mount_image() loop-mounts

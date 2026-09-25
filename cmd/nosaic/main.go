@@ -644,6 +644,13 @@ func upgradeCmd(args []string) error {
 		}
 
 		d := upgrade.Disk{Path: *disk, Log: os.Stdout}
+		// A block device on a running switch: the slot is a partition on it,
+		// and the boot pointer is the mounted one. See upgrade.Disk.State.
+		if fi, err := os.Stat(*disk); *disk != "" && err == nil &&
+			fi.Mode()&os.ModeDevice != 0 {
+			d.State = upgrade.StateDir()
+			d.Data = "/mnt/data"
+		}
 		if *disk == "" {
 			local, err := upgrade.Local()
 			if err != nil {

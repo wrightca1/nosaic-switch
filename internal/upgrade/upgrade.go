@@ -58,6 +58,17 @@ type Disk struct {
 	// layout is known but the bootloader's filesystem is not mounted.
 	Files bool
 
+	// State is the mounted directory holding the boot pointer, for a running
+	// switch whose slots are partitions. Empty means the pointer is read and
+	// written on the boot partition through debugfs, which is right offline
+	// and wrong live: raw writes under a mounted filesystem are lost when the
+	// kernel next writes its own cached copy of it.
+	//
+	// The slot is still written to the partition, found by name. Only the
+	// pointer moves to the mounted files, which is where the initramfs reads
+	// it from anyway.
+	State string
+
 	// Log receives progress. Nil is silent, which is what the offline
 	// callers want.
 	Log io.Writer
@@ -83,6 +94,53 @@ func (d Disk) partitions() ([]partition, error) {
 		return nil, err
 	}
 	return doc.PartitionTable.Partitions, nil
+}
+
+// partNames is NOSaic's layout in index order: bootIndex, then slotIndex's.
+var partNames = []string{"nosaic-boot", "nosaic-slot-a", "nosaic-slot-b", "nosaic-data"}
+
+// ourPartitions is the partition table reduced to NOSaic's four, in the order
+// bootIndex and slotIndex assume.
+//
+// ⚠ BY NAME WHEREVER THE DISK HAS NAMES, AND THAT IS NOT TIDINESS. On a board
+// that NOSaic's image owns outright, table order and layout order are the same
+// thing. On an ONIE x86 box they are not: ONIE keeps GRUB-BOOT and ONIE-BOOT
+// at the front of the same disk and our partitions are added after them, so
+// "index 2" is whatever happens to be third -- and writing slot b there
+// overwrites ONIE, the one thing that recovers a switch whose NOS is broken.
+//
+// Positional only for a table with no NOSaic names at all, which is a DOS
+// table -- and those are only written by the image builder, whole-disk.
+func (d Disk) ourPartitions() ([]partition, error) {
+	parts, err := d.partitions()
+	if err != nil {
+		return nil, err
+	}
+	named := false
+	for _, p := range parts {
+		if strings.HasPrefix(p.Name, "nosaic-") {
+			named = true
+			break
+		}
+	}
+	if !named {
+		return parts, nil
+	}
+	out := make([]partition, len(partNames))
+	for i, want := range partNames {
+		found := false
+		for _, p := range parts {
+			if p.Name == want {
+				out[i], found = p, true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("%s has NOSaic partitions but no %q; "+
+				"refusing to guess which partition to use", d.Path, want)
+		}
+	}
+	return out, nil
 }
 
 // slotIndex maps a slot letter to its partition index.
@@ -149,7 +207,7 @@ func Install(d Disk, slot, image string) error {
 		return d.writeState(map[string]string{"trial": slot, "tries": "0"})
 	}
 
-	parts, err := d.partitions()
+	parts, err := d.ourPartitions()
 	if err != nil {
 		return err
 	}
@@ -201,6 +259,14 @@ func Install(d Disk, slot, image string) error {
 
 	if err := d.clearSlotOverlay(slot); err != nil {
 		return err
+	}
+
+	// A live install owns the running system's overlays, as the file-backed
+	// path does: the target slot's old changes must not follow a new image.
+	if d.State != "" {
+		if err := d.clearSlotOverlay(slot); err != nil {
+			return err
+		}
 	}
 
 	// Marked as a trial, never as active. Nothing becomes the committed choice
@@ -271,7 +337,7 @@ func Status(d Disk) (State, error) {
 // written back. When the target is already a filesystem — a partition device
 // on a running switch — it is used directly and nothing is copied.
 func (d Disk) withData(write bool, fn func(path string) error) error {
-	parts, err := d.partitions()
+	parts, err := d.ourPartitions()
 	if err != nil || len(parts) <= bootIndex {
 		// No partition table: this is the filesystem itself.
 		return fn(d.Path)
@@ -346,6 +412,9 @@ func debugfsRun(fsPath string, write bool, request string) (string, error) {
 }
 
 func (d Disk) readState() (map[string]string, error) {
+	if d.State != "" {
+		return readStateDir(d.State)
+	}
 	if d.fileBacked() {
 		return readStateDir(filepath.Join(d.dataDir(), "boot"))
 	}
@@ -376,6 +445,9 @@ func (d Disk) readState() (map[string]string, error) {
 }
 
 func (d Disk) writeState(files map[string]string) error {
+	if d.State != "" {
+		return writeStateDir(d.State, files)
+	}
 	if d.fileBacked() {
 		return writeStateDir(filepath.Join(d.dataDir(), "boot"), files)
 	}
